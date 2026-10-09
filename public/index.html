@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enigma Card // Cyberpunk Math Card Game</title>
+
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        display: ["Orbitron", "sans-serif"],
+                        mono: ["'Share Tech Mono'", "monospace"],
+                    },
+                },
+            },
+        };
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+    <style>
+        /* ====== NỀN LƯỚI CYBERPUNK ====== */
+        body {
+            background-color: #09090b; /* zinc-950 */
+            color: #a7f3d0;
+            font-family: 'Share Tech Mono', monospace;
+        }
+        .cyber-grid {
+            background-image:
+                linear-gradient(rgba(34, 211, 238, 0.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(34, 211, 238, 0.06) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+        /* Hiệu ứng scanline phủ toàn trang */
+        body::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background: repeating-linear-gradient(
+                to bottom,
+                rgba(255, 255, 255, 0.025) 0px,
+                rgba(255, 255, 255, 0.025) 1px,
+                transparent 1px,
+                transparent 3px
+            );
+            z-index: 60;
+        }
+
+        /* ====== VIỀN PHÁT SÁNG ====== */
+        .glow-cyan {
+            border-color: rgba(34, 211, 238, 0.6);
+            box-shadow: 0 0 14px rgba(34, 211, 238, 0.30), inset 0 0 14px rgba(34, 211, 238, 0.07);
+        }
+        .glow-green {
+            border-color: rgba(74, 222, 128, 0.6);
+            box-shadow: 0 0 14px rgba(74, 222, 128, 0.30), inset 0 0 14px rgba(74, 222, 128, 0.07);
+        }
+        .glow-pink {
+            border-color: rgba(232, 121, 249, 0.6);
+            box-shadow: 0 0 14px rgba(232, 121, 249, 0.30), inset 0 0 14px rgba(232, 121, 249, 0.07);
+        }
+        .glow-red {
+            border-color: rgba(248, 113, 113, 0.6);
+            box-shadow: 0 0 14px rgba(248, 113, 113, 0.30), inset 0 0 14px rgba(248, 113, 113, 0.07);
+        }
+
+        /* ====== CHỮ NEON ====== */
+        .neon-cyan  { color: #22d3ee; text-shadow: 0 0 8px rgba(34, 211, 238, 0.85); }
+        .neon-green { color: #4ade80; text-shadow: 0 0 8px rgba(74, 222, 128, 0.85); }
+        .neon-pink  { color: #e879f9; text-shadow: 0 0 8px rgba(232, 121, 249, 0.85); }
+        .neon-red   { color: #f87171; text-shadow: 0 0 8px rgba(248, 113, 113, 0.85); }
+
+        /* Logo nhấp nháy nhẹ */
+        @keyframes flicker {
+            0%, 18%, 22%, 62%, 64%, 100% { opacity: 1; }
+            20%, 63% { opacity: 0.55; }
+        }
+        .logo-flicker { animation: flicker 5s infinite; }
+
+        /* Lá bài xuất hiện */
+        @keyframes dealIn {
+            from { opacity: 0; transform: translateY(-14px) rotateX(70deg); }
+            to   { opacity: 1; transform: translateY(0) rotateX(0); }
+        }
+        .card-deal { animation: dealIn 0.45s ease-out both; }
+
+        /* Nút bấm */
+        .btn-neon {
+            transition: all 0.18s ease;
+            letter-spacing: 0.08em;
+        }
+        .btn-neon:hover:not(:disabled) {
+            transform: translateY(-2px);
+            filter: brightness(1.25);
+        }
+        .btn-neon:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Thanh cuộn tối */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #09090b; }
+        ::-webkit-scrollbar-thumb { background: #164e63; border-radius: 4px; }
+    </style>
+</head>
+
+<body class="cyber-grid min-h-screen">
+
+<!-- =====================================================================
+     HEADER
+     ===================================================================== -->
+<header class="border-b border-cyan-500/30 bg-zinc-950/90 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+
+        <!-- Banner / Logo -->
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded border-2 glow-pink flex items-center justify-center font-display font-black neon-pink">E</div>
+            <div>
+                <h1 class="font-display font-black text-xl md:text-2xl tracking-widest neon-cyan logo-flicker">
+                    ENIGMA<span class="neon-pink">//</span>CARD
+                </h1>
+                <p class="text-[11px] text-zinc-500 tracking-[0.25em]">NEURAL MATH DUEL PROTOCOL v1.0</p>
+            </div>
+        </div>
+
+        <!-- Trạng thái kết nối + tài khoản -->
+        <div class="flex flex-wrap items-center gap-3 text-sm">
+            <div class="flex items-center gap-2 px-3 py-1 border border-zinc-700 rounded">
+                <span id="conn-dot" class="w-2.5 h-2.5 rounded-full bg-yellow-400 animate-pulse"></span>
+                <span id="conn-text" class="text-zinc-300">ĐANG KẾT NỐI...</span>
+            </div>
+
+            <!-- Khi chưa đăng nhập -->
+            <div id="auth-guest" class="flex items-center gap-2">
+                <button id="btn-open-login"
+                        class="btn-neon px-4 py-1.5 border-2 rounded font-display text-xs glow-cyan neon-cyan bg-zinc-950">
+                    ĐĂNG NHẬP
+                </button>
+                <button id="btn-open-register"
+                        class="btn-neon px-4 py-1.5 border-2 rounded font-display text-xs glow-pink neon-pink bg-zinc-950">
+                    ĐĂNG KÝ
+                </button>
+            </div>
+
+            <!-- Khi đã đăng nhập -->
+            <div id="auth-user" class="hidden items-center gap-3">
+                <div class="px-3 py-1 border border-green-500/50 rounded">
+                    <span class="neon-green" id="user-name">---</span>
+                    <span class="text-zinc-500 mx-1">|</span>
+                    <span class="text-zinc-400">ELO</span>
+                    <span class="neon-cyan font-bold" id="user-elo">1000</span>
+                </div>
+                <button id="btn-logout"
+                        class="btn-neon px-3 py-1.5 border-2 rounded font-display text-xs glow-red neon-red bg-zinc-950">
+                    THOÁT
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Điều hướng tab -->
+    <nav class="max-w-6xl mx-auto px-4 flex gap-6 font-display text-sm tracking-widest">
+        <button data-tab-btn="lobby"
+                class="py-2 border-b-2 border-cyan-400 text-cyan-300 transition-colors">SẢNH GAME</button>
+        <button data-tab-btn="game"
+                class="py-2 border-b-2 border-transparent text-zinc-500 hover:text-cyan-300 transition-colors">BÀN CHƠI</button>
+    </nav>
+</header>
+
+<main class="max-w-6xl mx-auto px-4 py-6">
+
+    <!-- =================================================================
+         TAB 1: SẢNH GAME (LOBBY)
+         ================================================================= -->
+    <section data-tab-panel="lobby" class="space-y-6">
+
+        <!-- Banner giới thiệu -->
+        <div class="border-2 rounded-lg p-5 glow-cyan bg-zinc-950/80">
+            <h2 class="font-display text-lg neon-green tracking-widest mb-2">&gt; CHỌN CHẾ ĐỘ THI ĐẤU</h2>
+            <p class="text-zinc-400 text-sm leading-relaxed">
+                Mỗi ván bạn nhận 2 lá bài tẩy. Bot cũng có 2 lá bí mật. Hệ thống công bố
+                <span class="neon-pink">Mystery Value (M)</span> được mã hóa từ điểm của cả hai.
+                Hãy giải mã điểm đối thủ, rồi quyết định THEO hoặc BỎ BÀI.
+            </p>
+        </div>
+
+        <!-- Độ khó Bot -->
+        <div class="flex flex-wrap items-center gap-3">
+            <label for="bot-tier" class="font-display text-xs tracking-widest text-zinc-400">ĐỘ KHÓ BOT:</label>
+            <select id="bot-tier"
+                    class="bg-zinc-900 border-2 glow-cyan rounded px-3 py-2 text-cyan-200 font-mono focus:outline-none">
+                <option value="800">Rookie (Elo 800)</option>
+                <option value="1500" selected>Veteran (Elo 1500)</option>
+                <option value="2100">Boss AI (Elo 2100)</option>
+            </select>
+            <span class="text-xs text-zinc-500">Boss AI (Elo &ge; 2000) biết suy luận ngược và biết bluff.</span>
+        </div>
+
+        <!-- Thẻ chọn chế độ -->
+        <div class="grid md:grid-cols-3 gap-5">
+
+            <!-- Đấu AI -->
+            <div class="border-2 rounded-lg p-5 glow-cyan bg-zinc-950/80 flex flex-col">
+                <div class="font-display text-xs tracking-[0.3em] text-zinc-500 mb-1">MODE 01</div>
+                <h3 class="font-display text-xl neon-cyan mb-2">ĐẤU AI</h3>
+                <p class="text-sm text-zinc-400 flex-1">
+                    Luyện tập với Bot. Công thức: <span class="text-cyan-300">M = (SA + SB) &times; X</span>.
+                    Thắng +15 Elo, thua -10 Elo. Pot khởi điểm 200.
+                </p>
+                <button data-start-mode="AI"
+                        class="btn-neon mt-4 w-full py-2 border-2 rounded font-display text-sm glow-cyan neon-cyan bg-zinc-950">
+                    VÀO TRẬN
+                </button>
+            </div>
+
+            <!-- Đấu Xếp Hạng -->
+            <div class="border-2 rounded-lg p-5 glow-green bg-zinc-950/80 flex flex-col">
+                <div class="font-display text-xs tracking-[0.3em] text-zinc-500 mb-1">MODE 02</div>
+                <h3 class="font-display text-xl neon-green mb-2">ĐẤU XẾP HẠNG</h3>
+                <p class="text-sm text-zinc-400 flex-1">
+                    Thi đấu tính điểm xếp hạng. Cùng công thức với Đấu AI nhưng thắng +25 Elo, thua -20 Elo.
+                    <span class="text-yellow-300">Yêu cầu đăng nhập.</span>
+                </p>
+                <button data-start-mode="PVP"
+                        class="btn-neon mt-4 w-full py-2 border-2 rounded font-display text-sm glow-green neon-green bg-zinc-950">
+                    TÌM TRẬN
+                </button>
+            </div>
+
+            <!-- Extreme -->
+            <div class="border-2 rounded-lg p-5 glow-pink bg-zinc-950/80 flex flex-col">
+                <div class="font-display text-xs tracking-[0.3em] text-zinc-500 mb-1">MODE 03</div>
+                <h3 class="font-display text-xl neon-pink mb-2">EXTREME</h3>
+                <p class="text-sm text-zinc-400 flex-1">
+                    Ma trận biến thiên: <span class="text-fuchsia-300">M = (SA &times; X) + (SB &times; Y) &minus; Z</span>.
+                    Pot khởi điểm x2 (400). Cực kỳ khó giải mã.
+                </p>
+                <button data-start-mode="EXTREME"
+                        class="btn-neon mt-4 w-full py-2 border-2 rounded font-display text-sm glow-pink neon-pink bg-zinc-950">
+                    KÍCH HOẠT
+                </button>
+            </div>
+        </div>
+
+        <!-- Bảng xếp hạng -->
+        <div class="border-2 rounded-lg glow-cyan bg-zinc-950/80 overflow-hidden">
+            <div class="flex items-center justify-between px-5 py-3 border-b border-cyan-500/30">
+                <h3 class="font-display tracking-widest neon-cyan">BẢNG XẾP HẠNG</h3>
+                <span id="leaderboard-note" class="text-xs text-zinc-500"></span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-zinc-500 text-xs tracking-widest">
+                        <tr>
+                            <th class="text-left px-5 py-2">#</th>
+                            <th class="text-left px-5 py-2">NGƯỜI CHƠI</th>
+                            <th class="text-right px-5 py-2">ELO</th>
+                            <th class="text-right px-5 py-2">THẮNG</th>
+                            <th class="text-right px-5 py-2">THUA</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-body">
+                        <tr><td colspan="5" class="px-5 py-6 text-center text-zinc-500">Đang tải dữ liệu...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- =================================================================
+         TAB 2: BÀN CHƠI (GAME BOARD)
+         ================================================================= -->
+    <section data-tab-panel="game" class="hidden space-y-5">
+
+        <!-- Thanh thông tin ván -->
+        <div class="flex flex-wrap items-center justify-between gap-3 border-2 rounded-lg px-4 py-3 glow-cyan bg-zinc-950/80">
+            <div class="text-sm">
+                <span class="text-zinc-500">MODE:</span>
+                <span id="mode-display" class="neon-pink font-bold">--</span>
+            </div>
+            <div class="text-sm">
+                <span class="text-zinc-500">ELO CỦA BẠN:</span>
+                <span id="player-elo-display" class="neon-cyan font-bold">1000</span>
+            </div>
+            <div class="text-sm">
+                <span class="text-zinc-500">POT:</span>
+                <span id="pot-value" class="neon-green font-bold text-lg">0</span>
+            </div>
+            <div class="text-sm">
+                <span class="text-zinc-500">THỜI GIAN:</span>
+                <span id="timer-display" class="neon-cyan font-bold text-lg">30s</span>
+            </div>
+        </div>
+
+        <!-- Thanh thời gian -->
+        <div class="w-full h-3 rounded-full bg-zinc-900 border border-zinc-700 overflow-hidden">
+            <div id="timer-bar" class="h-full bg-cyan-400 transition-all duration-1000 ease-linear"
+                 style="width: 100%; box-shadow: 0 0 10px rgba(34,211,238,0.8);"></div>
+        </div>
+
+        <!-- Khu vực đối thủ -->
+        <div class="border-2 rounded-lg p-4 glow-pink bg-zinc-950/80">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h3 class="font-display text-sm tracking-widest neon-pink">ĐỐI THỦ // BOT</h3>
+                <div class="text-sm">
+                    <span class="text-zinc-500">ELO BOT:</span>
+                    <span id="bot-elo-display" class="text-fuchsia-300">--</span>
+                    <span class="text-zinc-600 mx-2">|</span>
+                    <span class="text-zinc-500">HÀNH ĐỘNG:</span>
+                    <span id="bot-action-display" class="neon-pink font-bold">Đang chờ...</span>
+                </div>
+            </div>
+            <div id="bot-hand" class="flex justify-center gap-4 min-h-[7rem]"></div>
+        </div>
+
+        <!-- Bàn giữa: Mystery Value + Bài bàn -->
+        <div class="border-2 rounded-lg p-4 glow-green bg-zinc-950/80">
+            <div class="text-center mb-4">
+                <div class="text-xs tracking-[0.3em] text-zinc-500">MYSTERY VALUE</div>
+                <div id="mystery-value" class="font-display font-black text-5xl neon-green">--</div>
+                <div id="formula-display" class="text-xs text-zinc-500 mt-1"></div>
+            </div>
+            <div class="text-center text-xs tracking-[0.3em] text-zinc-500 mb-2">BÀI TRÊN BÀN</div>
+            <div id="board-cards" class="flex flex-wrap justify-center gap-4 min-h-[7rem]"></div>
+        </div>
+
+        <!-- Khu vực người chơi -->
+        <div class="border-2 rounded-lg p-4 glow-cyan bg-zinc-950/80">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="font-display text-sm tracking-widest neon-cyan">BẠN // PLAYER</h3>
+                <div class="text-sm">
+                    <span class="text-zinc-500">ĐIỂM CỦA BẠN (SA):</span>
+                    <span id="player-score" class="neon-cyan font-bold text-lg">--</span>
+                </div>
+            </div>
+            <div id="player-hand" class="flex justify-center gap-4 min-h-[7rem]"></div>
+        </div>
+
+        <!-- Khu vực giải mã toán học -->
+        <div class="border-2 rounded-lg p-4 glow-pink bg-zinc-950/80">
+            <h3 class="font-display text-sm tracking-widest neon-pink mb-2">&gt; TERMINAL GIẢI MÃ</h3>
+            <p class="text-xs text-zinc-400 mb-3">
+                Từ Mystery Value, bài bàn và điểm của bạn, hãy tính điểm của đối thủ (SB) rồi nhập vào đây.
+                Giải đúng sẽ lộ kết luận hơn/thua. Bạn có tối đa 3 lần thử mỗi ván.
+            </p>
+            <div class="flex flex-wrap items-center gap-3">
+                <input id="math-input" type="number" step="any" inputmode="decimal"
+                       placeholder="Nhập SB..."
+                       class="w-40 bg-zinc-900 border-2 glow-pink rounded px-3 py-2 text-fuchsia-200 font-mono focus:outline-none">
+                <button id="btn-decrypt"
+                        class="btn-neon px-5 py-2 border-2 rounded font-display text-xs glow-pink neon-pink bg-zinc-950">
+                    GIẢI MÃ
+                </button>
+                <span class="text-xs text-zinc-500">Lượt thử còn lại: <span id="decrypt-left" class="text-fuchsia-300">3</span></span>
+            </div>
+            <div id="decrypt-feedback" class="mt-3 text-sm min-h-[1.5rem]"></div>
+        </div>
+
+        <!-- Nút hành động -->
+        <div class="flex flex-wrap justify-center gap-4">
+            <button id="btn-call"
+                    class="btn-neon px-10 py-3 border-2 rounded font-display text-base glow-green neon-green bg-zinc-950">
+                THEO (CALL)
+            </button>
+            <button id="btn-fold"
+                    class="btn-neon px-10 py-3 border-2 rounded font-display text-base glow-red neon-red bg-zinc-950">
+                BỎ BÀI (FOLD)
+            </button>
+        </div>
+
+        <!-- Dòng trạng thái -->
+        <div id="game-status" class="text-center text-cyan-300 min-h-[1.5rem]">Chọn một chế độ ở Sảnh game để bắt đầu.</div>
+
+        <!-- Kết quả showdown -->
+        <div id="result-panel" class="hidden border-2 rounded-lg p-6 glow-cyan bg-zinc-950/95 text-center">
+            <div id="result-title" class="font-display font-black text-4xl tracking-widest mb-3">--</div>
+            <pre id="result-details" class="font-mono text-sm text-zinc-300 whitespace-pre-line mb-5"></pre>
+            <div class="flex flex-wrap justify-center gap-4">
+                <button id="btn-rematch"
+                        class="btn-neon px-6 py-2 border-2 rounded font-display text-sm glow-green neon-green bg-zinc-950">
+                    VÁN MỚI
+                </button>
+                <button id="btn-back-lobby"
+                        class="btn-neon px-6 py-2 border-2 rounded font-display text-sm glow-cyan neon-cyan bg-zinc-950">
+                    VỀ SẢNH
+                </button>
+            </div>
+        </div>
+    </section>
+</main>
+
+<footer class="text-center text-xs text-zinc-600 py-6 tracking-widest">
+    ENIGMA//CARD &copy; 2026 &mdash; ALL SYSTEMS NOMINAL
+</footer>
+
+<!-- =====================================================================
+     MODAL ĐĂNG NHẬP / ĐĂNG KÝ
+     ===================================================================== -->
+<div id="auth-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/80 px-4">
+    <div class="w-full max-w-md border-2 rounded-lg glow-cyan bg-zinc-950 p-6 relative">
+        <button id="btn-close-modal" aria-label="Đóng"
+                class="absolute top-3 right-4 text-zinc-500 hover:text-red-400 text-2xl leading-none">&times;</button>
+
+        <!-- Tab đăng nhập / đăng ký -->
+        <div class="flex gap-6 font-display text-sm tracking-widest mb-5 border-b border-zinc-800">
+            <button data-auth-tab="login" class="pb-2 border-b-2 border-cyan-400 text-cyan-300">ĐĂNG NHẬP</button>
+            <button data-auth-tab="register" class="pb-2 border-b-2 border-transparent text-zinc-500">ĐĂNG KÝ</button>
+        </div>
+
+        <form id="auth-form" class="space-y-4" novalidate>
+            <div>
+                <label for="auth-username" class="block text-xs tracking-widest text-zinc-400 mb-1">TÊN ĐĂNG NHẬP</label>
+                <input id="auth-username" type="text" autocomplete="username" maxlength="20"
+                       class="w-full bg-zinc-900 border-2 glow-cyan rounded px-3 py-2 text-cyan-100 font-mono focus:outline-none">
+            </div>
+            <div>
+                <label for="auth-password" class="block text-xs tracking-widest text-zinc-400 mb-1">MẬT KHẨU</label>
+                <input id="auth-password" type="password" autocomplete="current-password" maxlength="128"
+                       class="w-full bg-zinc-900 border-2 glow-cyan rounded px-3 py-2 text-cyan-100 font-mono focus:outline-none">
+            </div>
+            <div id="auth-confirm-wrap" class="hidden">
+                <label for="auth-confirm" class="block text-xs tracking-widest text-zinc-400 mb-1">NHẬP LẠI MẬT KHẨU</label>
+                <input id="auth-confirm" type="password" autocomplete="new-password" maxlength="128"
+                       class="w-full bg-zinc-900 border-2 glow-pink rounded px-3 py-2 text-fuchsia-100 font-mono focus:outline-none">
+            </div>
+
+            <div id="auth-message" class="text-sm min-h-[1.25rem]"></div>
+
+            <button id="auth-submit" type="submit"
+                    class="btn-neon w-full py-2.5 border-2 rounded font-display text-sm glow-cyan neon-cyan bg-zinc-950">
+                ĐĂNG NHẬP
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- =====================================================================
+     JAVASCRIPT
+     ===================================================================== -->
+<script>
+"use strict";
+
+// ======================================================================
+// HẰNG SỐ
+// ======================================================================
+const API = {
+    LOGIN: "/api/auth/login",
+    REGISTER: "/api/auth/register",
+    LEADERBOARD: "/api/leaderboard",
+    START: "/api/game/start",
+    BOT_TURN: "/api/game/bot-turn",
+    SHOWDOWN: "/api/game/showdown",
+};
+
+const TURN_SECONDS = 30;
+const TIMER_WARNING_SECONDS = 10;
+const DECRYPT_MAX_ATTEMPTS = 3;
+const DEFAULT_ELO = 1000;
+const SHOWDOWN_DELAY_MS = 900;
+const STORAGE_ELO = "enigma_player_elo";
+const STORAGE_USER = "enigma_user";
+
+// Dữ liệu demo hiển thị khi API bảng xếp hạng chưa sẵn sàng
+const DEMO_LEADERBOARD = [
+    { username: "NeonGhost", elo: 2310, pvp_wins: 87, pvp_losses: 21 },
+    { username: "CipherQueen", elo: 2145, pvp_wins: 64, pvp_losses: 30 },
+    { username: "ByteRunner", elo: 1890, pvp_wins: 52, pvp_losses: 38 },
+    { username: "Zer0Cool", elo: 1640, pvp_wins: 33, pvp_losses: 29 },
+    { username: "GlitchWitch", elo: 1425, pvp_wins: 20, pvp_losses: 25 },
+];
+
+// ======================================================================
+// TRẠNG THÁI
+// ======================================================================
+const state = {
+    activeTab: "lobby",
+    phase: "idle",          // 'idle' | 'playing' | 'resolving' | 'finished'
+    busy: false,
+
+    user: null,             // {id, username, elo, pvp_wins, pvp_losses} hoặc null
+    playerElo: DEFAULT_ELO,
+
+    gameId: null,
+    mode: "AI",
+    lastMode: "AI",
+    botElo: 1500,
+    playerHand: [],
+    boardCards: [],
+    mysteryValue: null,
+    pot: 0,
+
+    playerAction: null,
+    botAction: null,
+    botRaiseAmount: 0,
+    result: null,
+
+    timeLeft: TURN_SECONDS,
+    timerId: null,
+
+    decryptLeft: DECRYPT_MAX_ATTEMPTS,
+    decrypted: false,
+
+    authMode: "login",      // 'login' | 'register'
+};
+
+// ======================================================================
+// TIỆN ÍCH
+// ======================================================================
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sum = (arr) => arr.reduce((total, value) => total + value, 0);
+
+function setText(id, text) {
+    const el = $(id);
+    if (el) el.textContent = text;
+}
+
+function setDisabled(id, disabled) {
+    const el = $(id);
+    if (el) el.disabled = disabled;
+}
+
+/** Hiển thị dòng trạng thái ván đấu. */
+function setStatus(message, type = "info") {
+    const el = $("game-status");
+    const colors = {
+        info: "text-cyan-300",
+        success: "text-green-400",
+        error: "text-red-400",
+        warning: "text-yellow-300",
+    };
+    Object.values(colors).forEach((c) => el.classList.remove(c));
+    el.classList.add(colors[type] || colors.info);
+    el.textContent = message;
+}
+
+/** Gửi POST JSON, trả về dữ liệu; ném Error có thông báo thân thiện nếu thất bại. */
+async function apiPost(url, body) {
+    let response;
+    try {
+        response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body || {}),
+        });
+    } catch (networkError) {
+        setConnection("offline");
+        throw new Error("Không thể kết nối tới máy chủ. Vui lòng kiểm tra mạng.");
+    }
+
+    let data;
+    try {
+        data = await response.json();
+    } catch (parseError) {
+        throw new Error(`Máy chủ trả về dữ liệu không hợp lệ (HTTP ${response.status}).`);
+    }
+
+    setConnection("online");
+    if (!response.ok || !data.success) {
+        const error = new Error(data.error || data.message || `Yêu cầu thất bại (HTTP ${response.status}).`);
+        error.status = response.status;
+        throw error;
+    }
+    return data;
+}
+
+/** Tạo phần tử lá bài. */
+function createCard(value, label = "", hidden = false, delayIndex = 0) {
+    const wrap = document.createElement("div");
+    wrap.className = "flex flex-col items-center gap-1 card-deal";
+    wrap.style.animationDelay = `${delayIndex * 90}ms`;
+
+    if (label) {
+        const labelEl = document.createElement("span");
+        labelEl.className = "text-xs font-mono text-fuchsia-400";
+        labelEl.textContent = label;
+        wrap.appendChild(labelEl);
+    }
+
+    const card = document.createElement("div");
+    card.className = hidden
+        ? "w-16 h-24 flex items-center justify-center rounded-lg border-2 border-zinc-600 " +
+          "bg-zinc-900 text-zinc-500 text-3xl font-display font-bold"
+        : "w-16 h-24 flex items-center justify-center rounded-lg border-2 glow-cyan " +
+          "bg-zinc-950 text-cyan-300 text-3xl font-display font-bold";
+    card.textContent = hidden ? "?" : String(value);
+    wrap.appendChild(card);
+    return wrap;
+}
+
+// ======================================================================
+// TRẠNG THÁI KẾT NỐI
+// ======================================================================
+function setConnection(status, text) {
+    const dot = $("conn-dot");
+    const label = $("conn-text");
+    dot.classList.remove("bg-green-400", "bg-red-500", "bg-yellow-400", "animate-pulse");
+
+    if (status === "online") {
+        dot.classList.add("bg-green-400");
+        label.textContent = text || "ONLINE";
+    } else if (status === "offline") {
+        dot.classList.add("bg-red-500");
+        label.textContent = text || "OFFLINE";
+    } else {
+        dot.classList.add("bg-yellow-400", "animate-pulse");
+        label.textContent = text || "ĐANG KẾT NỐI...";
+    }
+}
+
+// ======================================================================
+// LƯU TRỮ CỤC BỘ (Elo, user)
+// ======================================================================
+function loadStoredData() {
+    try {
+        const elo = parseInt(localStorage.getItem(STORAGE_ELO), 10);
+        state.playerElo = Number.isFinite(elo) && elo >= 0 ? elo : DEFAULT_ELO;
+    } catch (e) {
+        state.playerElo = DEFAULT_ELO;
+    }
+    try {
+        const raw = localStorage.getItem(STORAGE_USER);
+        state.user = raw ? JSON.parse(raw) : null;
+        if (state.user && Number.isFinite(state.user.elo)) {
+            state.playerElo = state.user.elo;
+        }
+    } catch (e) {
+        state.user = null;
+    }
+}
+
+function persistData() {
+    try {
+        localStorage.setItem(STORAGE_ELO, String(state.playerElo));
+        if (state.user) {
+            state.user.elo = state.playerElo;
+            localStorage.setItem(STORAGE_USER, JSON.stringify(state.user));
+        } else {
+            localStorage.removeItem(STORAGE_USER);
+        }
+    } catch (e) {
+        /* localStorage có thể bị chặn: bỏ qua */
+    }
+}
+
+// ======================================================================
+// HEADER / TÀI KHOẢN
+// ======================================================================
+function renderHeader() {
+    const loggedIn = !!state.user;
+    $("auth-guest").classList.toggle("hidden", loggedIn);
+    $("auth-user").classList.toggle("hidden", !loggedIn);
+    $("auth-user").classList.toggle("flex", loggedIn);
+    $("auth-guest").classList.toggle("flex", !loggedIn);
+
+    if (loggedIn) {
+        setText("user-name", state.user.username);
+        setText("user-elo", String(state.playerElo));
+    }
+    setText("player-elo-display", String(state.playerElo));
+}
+
+function logout() {
+    state.user = null;
+    persistData();
+    renderHeader();
+}
+
+// ======================================================================
+// MODAL AUTH
+// ======================================================================
+function openAuthModal(mode = "login") {
+    setAuthMode(mode);
+    $("auth-form").reset();
+    setAuthMessage("");
+    const modal = $("auth-modal");
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+    $("auth-username").focus();
+}
+
+function closeAuthModal() {
+    const modal = $("auth-modal");
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+}
+
+function setAuthMode(mode) {
+    state.authMode = mode;
+    const isRegister = mode === "register";
+
+    document.querySelectorAll("[data-auth-tab]").forEach((btn) => {
+        const active = btn.dataset.authTab === mode;
+        btn.classList.toggle("border-cyan-400", active);
+        btn.classList.toggle("text-cyan-300", active);
+        btn.classList.toggle("border-transparent", !active);
+        btn.classList.toggle("text-zinc-500", !active);
+    });
+
+    $("auth-confirm-wrap").classList.toggle("hidden", !isRegister);
+    $("auth-submit").textContent = isRegister ? "TẠO TÀI KHOẢN" : "ĐĂNG NHẬP";
+    $("auth-password").autocomplete = isRegister ? "new-password" : "current-password";
+    setAuthMessage("");
+}
+
+function setAuthMessage(message, type = "error") {
+    const el = $("auth-message");
+    el.classList.remove("text-red-400", "text-green-400");
+    el.classList.add(type === "success" ? "text-green-400" : "text-red-400");
+    el.textContent = message;
+}
+
+/** Lưu người dùng sau khi đăng nhập thành công. */
+function applyLoggedInUser(user) {
+    state.user = user;
+    if (Number.isFinite(user.elo)) {
+        state.playerElo = user.elo;
+    }
+    persistData();
+    renderHeader();
+}
+
+async function handleAuthSubmit(event) {
+    event.preventDefault();
+
+    const username = $("auth-username").value.trim();
+    const password = $("auth-password").value;
+    const isRegister = state.authMode === "register";
+
+    // Kiểm tra phía client (server vẫn kiểm tra lại)
+    if (!username || !password) {
+        setAuthMessage("Vui lòng nhập tên đăng nhập và mật khẩu.");
+        return;
+    }
+    if (isRegister) {
+        if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) {
+            setAuthMessage("Tên đăng nhập 3-20 ký tự, chỉ gồm chữ, số và dấu gạch dưới.");
+            return;
+        }
+        if (password.length < 6) {
+            setAuthMessage("Mật khẩu phải có ít nhất 6 ký tự.");
+            return;
+        }
+        if (password !== $("auth-confirm").value) {
+            setAuthMessage("Mật khẩu nhập lại không khớp.");
+            return;
+        }
+    }
+
+    setDisabled("auth-submit", true);
+    setAuthMessage("Đang xử lý...", "success");
+
+    try {
+        if (isRegister) {
+            await apiPost(API.REGISTER, { username, password });
+        }
+        const data = await apiPost(API.LOGIN, { username, password });
+        applyLoggedInUser(data.user);
+        closeAuthModal();
+        loadLeaderboard();
+    } catch (error) {
+        const message = error.status === 404
+            ? "API xác thực chưa được triển khai trên server (thiếu route /api/auth)."
+            : error.message;
+        setAuthMessage(message);
+    } finally {
+        setDisabled("auth-submit", false);
+    }
+}
+
+// ======================================================================
+// CHUYỂN TAB
+// ======================================================================
+function switchTab(tabName) {
+    document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
+        panel.classList.toggle("hidden", panel.dataset.tabPanel !== tabName);
+    });
+    document.querySelectorAll("[data-tab-btn]").forEach((btn) => {
+        const active = btn.dataset.tabBtn === tabName;
+        btn.classList.toggle("border-cyan-400", active);
+        btn.classList.toggle("text-cyan-300", active);
+        btn.classList.toggle("border-transparent", !active);
+        btn.classList.toggle("text-zinc-500", !active);
+    });
+    state.activeTab = tabName;
+}
+
+// ======================================================================
+// BẢNG XẾP HẠNG
+// ======================================================================
+function renderLeaderboard(players, isDemo) {
+    const body = $("leaderboard-body");
+    body.replaceChildren();
+
+    players.slice(0, 10).forEach((player, index) => {
+        const row = document.createElement("tr");
+        row.className = "border-t border-zinc-800 hover:bg-cyan-500/5";
+        if (state.user && state.user.username.toLowerCase() === String(player.username).toLowerCase()) {
+            row.classList.add("bg-green-500/10");
+        }
+
+        const cells = [
+            { text: String(index + 1), cls: index === 0 ? "neon-pink font-bold" : "text-zinc-500", align: "left" },
+            { text: player.username, cls: "text-cyan-200", align: "left" },
+            { text: String(player.elo), cls: "neon-cyan font-bold", align: "right" },
+            { text: String(player.pvp_wins), cls: "text-green-400", align: "right" },
+            { text: String(player.pvp_losses), cls: "text-red-400", align: "right" },
+        ];
+        cells.forEach((cell) => {
+            const td = document.createElement("td");
+            td.className = `px-5 py-2 text-${cell.align} ${cell.cls}`;
+            td.textContent = cell.text;
+            row.appendChild(td);
+        });
+        body.appendChild(row);
+    });
+
+    if (players.length === 0) {
+        body.innerHTML = '<tr><td colspan="5" class="px-5 py-6 text-center text-zinc-500">Chưa có người chơi nào.</td></tr>';
+    }
+    setText("leaderboard-note", isDemo ? "DỮ LIỆU DEMO (API chưa sẵn sàng)" : "CẬP NHẬT TRỰC TIẾP");
+}
+
+/** Tải bảng xếp hạng từ GET /api/leaderboard; lỗi thì dùng dữ liệu demo. */
+async function loadLeaderboard() {
+    try {
+        const response = await fetch(API.LEADERBOARD);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        if (!data.success || !Array.isArray(data.players)) {
+            throw new Error("Dữ liệu không hợp lệ");
+        }
+        setConnection("online");
+        renderLeaderboard(data.players, false);
+    } catch (error) {
+        // 404 nghĩa là server có chạy nhưng chưa có route này
+        renderLeaderboard(DEMO_LEADERBOARD, true);
+    }
+}
+
+/** Kiểm tra server có phản hồi hay không (dùng route /api/leaderboard). */
+async function checkConnection() {
+    try {
+        const response = await fetch(API.LEADERBOARD, { method: "GET" });
+        if (response.ok) {
+            setConnection("online");
+        } else {
+            setConnection("online", "ONLINE (API THIẾU)");
+        }
+    } catch (error) {
+        setConnection("offline");
+    }
+}
+
+// ======================================================================
+// ĐẾM NGƯỢC 30 GIÂY
+// ======================================================================
+function renderTimer() {
+    const seconds = Math.max(0, state.timeLeft);
+    const warning = seconds <= TIMER_WARNING_SECONDS;
+
+    const label = $("timer-display");
+    label.textContent = `${seconds}s`;
+    label.classList.toggle("neon-red", warning);
+    label.classList.toggle("neon-cyan", !warning);
+
+    const bar = $("timer-bar");
+    bar.style.width = `${(seconds / TURN_SECONDS) * 100}%`;
+    bar.classList.toggle("bg-red-500", warning);
+    bar.classList.toggle("bg-cyan-400", !warning);
+}
+
+function stopCountdown() {
+    if (state.timerId !== null) {
+        clearInterval(state.timerId);
+        state.timerId = null;
+    }
+}
+
+function startCountdown(seconds = TURN_SECONDS) {
+    stopCountdown();
+    state.timeLeft = seconds;
+    renderTimer();
+
+    state.timerId = setInterval(() => {
+        state.timeLeft -= 1;
+        renderTimer();
+        if (state.timeLeft <= 0) {
+            stopCountdown();
+            if (state.phase === "playing" && !state.busy) {
+                setStatus("Hết giờ! Hệ thống tự động bỏ bài.", "warning");
+                playerAction("FOLD");
+            }
+        }
+    }, 1000);
+}
+
+// ======================================================================
+// GIẢI MÃ TOÁN HỌC
+// ======================================================================
+
+/** Chuỗi công thức hiển thị theo chế độ. */
+function formulaText(mode) {
+    return mode === "EXTREME"
+        ? "M = (SA × X) + (SB × Y) − Z    |    X, Y, Z = 3 lá bài bàn đầu tiên"
+        : "M = (SA + SB) × X    |    X = lá bài bàn đầu tiên";
+}
+
+/** Tính SB đúng từ M, bài bàn và SA của người chơi (người chơi cũng tự tính được). */
+function computeOpponentScore() {
+    const [x, y, z] = state.boardCards;
+    const sa = sum(state.playerHand);
+    if (state.mode === "EXTREME") {
+        return (state.mysteryValue - sa * x + z) / y;
+    }
+    return state.mysteryValue / x - sa;
+}
+
+function resetDecryptPanel() {
+    state.decryptLeft = DECRYPT_MAX_ATTEMPTS;
+    state.decrypted = false;
+    $("math-input").value = "";
+    setText("decrypt-left", String(state.decryptLeft));
+    $("decrypt-feedback").textContent = "";
+}
+
+function submitDecrypt() {
+    if (state.phase !== "playing" || state.busy || state.decrypted || state.decryptLeft <= 0) {
+        return;
+    }
+
+    const raw = $("math-input").value.trim();
+    const feedback = $("decrypt-feedback");
+    const guess = Number(raw);
+
+    if (raw === "" || !Number.isFinite(guess)) {
+        feedback.className = "mt-3 text-sm min-h-[1.5rem] text-yellow-300";
+        feedback.textContent = "Vui lòng nhập một con số hợp lệ.";
+        return;
+    }
+
+    const expected = computeOpponentScore();
+    if (Math.abs(guess - expected) < 1e-9) {
+        state.decrypted = true;
+        const sa = sum(state.playerHand);
+        let verdict;
+        if (expected > sa) {
+            verdict = "Đối thủ MẠNH hơn bạn. Cân nhắc BỎ BÀI.";
+        } else if (expected < sa) {
+            verdict = "Đối thủ YẾU hơn bạn. Nên THEO.";
+        } else {
+            verdict = "Hai bên HÒA điểm.";
+        }
+        feedback.className = "mt-3 text-sm min-h-[1.5rem] text-green-400";
+        feedback.textContent = `GIẢI MÃ THÀNH CÔNG: SB = ${expected}. ${verdict}`;
+        setDisabled("btn-decrypt", true);
+        setDisabled("math-input", true);
+        return;
+    }
+
+    state.decryptLeft -= 1;
+    setText("decrypt-left", String(state.decryptLeft));
+    feedback.className = "mt-3 text-sm min-h-[1.5rem] text-red-400";
+    if (state.decryptLeft <= 0) {
+        feedback.textContent = "GIẢI MÃ THẤT BẠI. Bạn đã hết lượt thử.";
+        setDisabled("btn-decrypt", true);
+        setDisabled("math-input", true);
+    } else {
+        feedback.textContent = `Sai rồi. Còn ${state.decryptLeft} lượt thử.`;
+    }
+}
+
+// ======================================================================
+// VẼ BÀN CHƠI
+// ======================================================================
+function renderGameBoard() {
+    // Bài người chơi
+    const handEl = $("player-hand");
+    handEl.replaceChildren();
+    state.playerHand.forEach((value, i) => handEl.appendChild(createCard(value, `Lá ${i + 1}`, false, i)));
+    setText("player-score", state.playerHand.length ? String(sum(state.playerHand)) : "--");
+
+    // Bài bàn: 3 lá đầu mang nhãn X, Y, Z
+    const boardEl = $("board-cards");
+    boardEl.replaceChildren();
+    const labels = ["X", "Y", "Z"];
+    state.boardCards.forEach((value, i) => {
+        boardEl.appendChild(createCard(value, i < labels.length ? labels[i] : `#${i + 1}`, false, i));
+    });
+
+    // Bài Bot: úp, lộ khi showdown
+    const botEl = $("bot-hand");
+    botEl.replaceChildren();
+    if (state.phase === "finished" && state.result) {
+        state.result.bot_hand.forEach((value, i) => botEl.appendChild(createCard(value, "", false, i)));
+    } else if (state.phase !== "idle") {
+        botEl.appendChild(createCard("?", "", true));
+        botEl.appendChild(createCard("?", "", true));
+    }
+
+    // Thông số
+    setText("mystery-value", state.mysteryValue === null ? "--" : String(state.mysteryValue));
+    setText("formula-display", state.phase === "idle" ? "" : formulaText(state.mode));
+    setText("pot-value", String(state.pot));
+    setText("mode-display", state.phase === "idle" ? "--" : state.mode);
+    setText("bot-elo-display", state.phase === "idle" ? "--" : String(state.botElo));
+    setText("player-elo-display", String(state.playerElo));
+
+    let botText = "Đang chờ...";
+    if (state.botAction === "RAISE") botText = `TỐ (+${state.botRaiseAmount})`;
+    else if (state.botAction === "CALL") botText = "THEO";
+    else if (state.botAction === "FOLD") botText = "BỎ BÀI";
+    setText("bot-action-display", botText);
+
+    // Trạng thái nút
+    const canAct = state.phase === "playing" && !state.busy;
+    setDisabled("btn-call", !canAct);
+    setDisabled("btn-fold", !canAct);
+    const canDecrypt = canAct && !state.decrypted && state.decryptLeft > 0;
+    setDisabled("btn-decrypt", !canDecrypt);
+    setDisabled("math-input", !canDecrypt);
+
+    renderTimer();
+}
+
+function renderShowdownResult() {
+    const r = state.result;
+    if (!r) return;
+
+    const titles = { WIN: "CHIẾN THẮNG", LOSE: "THẤT BẠI", DRAW: "HÒA" };
+    const title = $("result-title");
+    title.textContent = titles[r.result] || r.result;
+    title.classList.remove("neon-green", "neon-red", "text-yellow-300");
+    title.classList.add(r.result === "WIN" ? "neon-green" : r.result === "LOSE" ? "neon-red" : "text-yellow-300");
+
+    const sign = r.elo_change > 0 ? "+" : "";
+    const bluff = r.bot_bluffed ? " (Bot đã bluff!)" : "";
+    setText(
+        "result-details",
+        `Điểm của bạn: ${r.player_score}  |  Điểm của Bot: ${r.bot_score}${bluff}\n` +
+        `Pot nhận được: ${r.pot_won} / ${r.pot}\n` +
+        `Elo: ${sign}${r.elo_change}  (mới: ${r.new_player_elo})`
+    );
+    $("result-panel").classList.remove("hidden");
+}
+
+// ======================================================================
+// LUỒNG VÁN ĐẤU
+// ======================================================================
+
+/** Bắt đầu ván mới: POST /api/game/start. */
+async function startNewMatch(mode) {
+    if (state.busy || state.phase === "playing" || state.phase === "resolving") {
+        return;
+    }
+
+    // Chế độ xếp hạng yêu cầu đăng nhập
+    if (mode === "PVP" && !state.user) {
+        openAuthModal("login");
+        setAuthMessage("Bạn cần đăng nhập để chơi Đấu Xếp Hạng.");
+        return;
+    }
+
+    // Elo của Bot: Đấu Xếp Hạng dùng Elo người chơi, các chế độ khác dùng độ khó đã chọn
+    const tierElo = parseInt($("bot-tier").value, 10) || 1500;
+    const botElo = mode === "PVP" ? state.playerElo : tierElo;
+
+    stopCountdown();
+    state.busy = true;
+    state.lastMode = mode;
+    $("result-panel").classList.add("hidden");
+    switchTab("game");
+    setStatus("Đang khởi tạo ván đấu...", "info");
+    renderGameBoard();
+
+    try {
+        const data = await apiPost(API.START, { mode, bot_elo: botElo });
+
+        state.gameId = data.game_id;
+        state.mode = data.mode;
+        state.botElo = botElo;
+        state.playerHand = data.player_hand;
+        state.boardCards = data.board_cards;
+        state.mysteryValue = data.mystery_value;
+        state.pot = data.pot;
+        state.playerAction = null;
+        state.botAction = null;
+        state.botRaiseAmount = 0;
+        state.result = null;
+        state.phase = "playing";
+        state.busy = false;
+
+        resetDecryptPanel();
+        renderGameBoard();
+        setStatus("Ván đấu bắt đầu! Giải mã điểm đối thủ rồi chọn THEO hoặc BỎ BÀI.", "success");
+        startCountdown(TURN_SECONDS);
+    } catch (error) {
+        state.busy = false;
+        state.phase = "idle";
+        renderGameBoard();
+        const message = error.status === 404
+            ? "Không tìm thấy API game trên server (route /api/game/start)."
+            : error.message;
+        setStatus(message, "error");
+    }
+}
+
+/** Người chơi THEO hoặc BỎ BÀI, sau đó Bot hành động: POST /api/game/bot-turn. */
+async function playerAction(action) {
+    if (state.phase !== "playing" || state.busy) {
+        return;
+    }
+    const normalized = String(action || "").toUpperCase();
+    if (normalized !== "CALL" && normalized !== "FOLD") {
+        setStatus("Hành động không hợp lệ.", "error");
+        return;
+    }
+
+    stopCountdown();
+    state.busy = true;
+    state.playerAction = normalized;
+    renderGameBoard();
+    setStatus(normalized === "FOLD" ? "Bạn bỏ bài. Đang chờ Bot..." : "Bạn theo. Bot đang suy nghĩ...", "info");
+
+    try {
+        const data = await apiPost(API.BOT_TURN, { game_id: state.gameId });
+
+        state.botAction = data.action;
+        state.botRaiseAmount = data.raise_amount;
+        state.pot = data.pot;
+        state.phase = "resolving";
+        state.busy = false;
+        renderGameBoard();
+
+        if (data.action === "RAISE") {
+            setStatus(`Bot TỐ thêm ${data.raise_amount}! Pot hiện tại: ${data.pot}.`, "warning");
+        } else if (data.action === "CALL") {
+            setStatus("Bot THEO.", "info");
+        } else {
+            setStatus("Bot BỎ BÀI!", "success");
+        }
+
+        await sleep(SHOWDOWN_DELAY_MS);
+        await processShowdown();
+    } catch (error) {
+        state.busy = false;
+        if (error.status === 404) {
+            // Ván không còn trên server (hết hạn hoặc nằm ở instance khác)
+            state.phase = "idle";
+            renderGameBoard();
+            setStatus(`${error.message} Hãy bắt đầu ván mới.`, "error");
+            return;
+        }
+        state.phase = "playing";
+        state.playerAction = null;
+        renderGameBoard();
+        setStatus(error.message, "error");
+        startCountdown(Math.max(state.timeLeft, 5));
+    }
+}
+
+/** Mở bài: POST /api/game/showdown. */
+async function processShowdown() {
+    if (!state.gameId || state.busy || state.phase !== "resolving") {
+        return;
+    }
+
+    state.busy = true;
+    setStatus("Đang mở bài...", "info");
+    renderGameBoard();
+
+    try {
+        const data = await apiPost(API.SHOWDOWN, {
+            game_id: state.gameId,
+            player_action: state.playerAction || "CALL",
+            player_elo: state.playerElo,
+        });
+
+        state.result = data;
+        state.pot = data.pot;
+        state.playerElo = data.new_player_elo;
+        persistData();
+
+        state.phase = "finished";
+        state.busy = false;
+        renderHeader();
+        renderGameBoard();
+        renderShowdownResult();
+
+        if (data.result === "WIN") setStatus("Bạn thắng ván này!", "success");
+        else if (data.result === "LOSE") setStatus("Bạn thua ván này.", "error");
+        else setStatus("Ván đấu hòa.", "warning");
+    } catch (error) {
+        state.busy = false;
+        state.phase = error.status === 404 ? "idle" : "resolving";
+        renderGameBoard();
+        setStatus(error.message, "error");
+
+        // Lỗi tạm thời: thử lại sau 2 giây
+        if (error.status !== 404 && error.status !== 409) {
+            setTimeout(() => {
+                if (state.phase === "resolving" && !state.busy) processShowdown();
+            }, 2000);
+        }
+    }
+}
+
+// ======================================================================
+// KHỞI TẠO
+// ======================================================================
+function init() {
+    loadStoredData();
+    renderHeader();
+    renderGameBoard();
+
+    // Tab
+    document.querySelectorAll("[data-tab-btn]").forEach((btn) => {
+        btn.addEventListener("click", () => switchTab(btn.dataset.tabBtn));
+    });
+    switchTab("lobby");
+
+    // Chọn chế độ ở sảnh
+    document.querySelectorAll("[data-start-mode]").forEach((btn) => {
+        btn.addEventListener("click", () => startNewMatch(btn.dataset.startMode));
+    });
+
+    // Điều khiển ván đấu
+    $("btn-call").addEventListener("click", () => playerAction("CALL"));
+    $("btn-fold").addEventListener("click", () => playerAction("FOLD"));
+    $("btn-decrypt").addEventListener("click", submitDecrypt);
+    $("math-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submitDecrypt();
+    });
+    $("btn-rematch").addEventListener("click", () => {
+        state.phase = "finished";
+        startNewMatch(state.lastMode);
+    });
+    $("btn-back-lobby").addEventListener("click", () => {
+        state.phase = "idle";
+        state.result = null;
+        $("result-panel").classList.add("hidden");
+        renderGameBoard();
+        switchTab("lobby");
+        loadLeaderboard();
+    });
+
+    // Auth
+    $("btn-open-login").addEventListener("click", () => openAuthModal("login"));
+    $("btn-open-register").addEventListener("click", () => openAuthModal("register"));
+    $("btn-logout").addEventListener("click", logout);
+    $("btn-close-modal").addEventListener("click", closeAuthModal);
+    $("auth-modal").addEventListener("click", (e) => {
+        if (e.target.id === "auth-modal") closeAuthModal();
+    });
+    document.querySelectorAll("[data-auth-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => setAuthMode(btn.dataset.authTab));
+    });
+    $("auth-form").addEventListener("submit", handleAuthSubmit);
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeAuthModal();
+    });
+
+    // Dữ liệu từ server
+    checkConnection();
+    loadLeaderboard();
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+} else {
+    init();
+}
+</script>
+</body>
+</html>
