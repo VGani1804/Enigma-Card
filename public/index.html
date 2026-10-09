@@ -92,6 +92,18 @@
         }
         .card-deal { animation: dealIn 0.45s ease-out both; }
 
+        /* Lật lá bài bí ẩn khi giải đúng */
+        @keyframes flipOpen {
+            0%   { transform: rotateY(90deg) scale(0.9); opacity: 0.35; }
+            100% { transform: rotateY(0) scale(1); opacity: 1; }
+        }
+        .card-flip { animation: flipOpen 0.55s ease-out both; }
+
+        /* Lá úp có thể bấm để chọn */
+        .card-selectable { cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+        .card-selectable:hover { transform: translateY(-4px); }
+        .card-selectable:focus-visible { outline: 2px solid #e879f9; outline-offset: 3px; }
+
         /* Nút bấm */
         .btn-neon {
             transition: all 0.18s ease;
@@ -344,11 +356,38 @@
 
         <!-- Khu vực giải mã toán học -->
         <div class="border-2 rounded-lg p-4 glow-pink bg-zinc-950/80">
-            <h3 class="font-display text-sm tracking-widest neon-pink mb-2">&gt; TERMINAL GIẢI MÃ</h3>
-            <p class="text-xs text-zinc-400 mb-3">
-                Từ Mystery Value, bài bàn và điểm của bạn, hãy tính điểm của đối thủ (SB) rồi nhập vào đây.
+            <h3 class="font-display text-sm tracking-widest neon-pink mb-3">&gt; TERMINAL GIẢI MÃ</h3>
+
+            <!-- BƯỚC 1: LẬT CÁC LÁ BÍ ẨN -->
+            <div class="mb-5 pb-5 border-b border-zinc-800">
+                <div class="text-xs tracking-widest text-zinc-400 mb-1">
+                    BƯỚC 1 // LẬT LÁ BÍ ẨN
+                    <span id="reveal-progress" class="text-fuchsia-300">(0/5)</span>
+                </div>
+                <p class="text-xs text-zinc-500 mb-3">
+                    Cả 5 lá bài bàn đang úp. Bấm vào một lá úp, giải phép tính gợi ý rồi nhập
+                    <span class="text-cyan-300">giá trị của lá đó</span> để lật nó. Không giới hạn số lần thử, nhưng bị giới hạn bởi thời gian.
+                </p>
+                <div id="clue-display" class="font-display text-lg neon-cyan mb-3 min-h-[1.75rem]">--</div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <input id="reveal-input" type="number" step="any" inputmode="decimal"
+                           placeholder="Giá trị lá..."
+                           class="w-40 bg-zinc-900 border-2 glow-cyan rounded px-3 py-2 text-cyan-100 font-mono focus:outline-none">
+                    <button id="btn-reveal"
+                            class="btn-neon px-5 py-2 border-2 rounded font-display text-xs glow-cyan neon-cyan bg-zinc-950">
+                        LẬT LÁ
+                    </button>
+                </div>
+                <div id="reveal-feedback" class="mt-2 text-sm min-h-[1.25rem]"></div>
+            </div>
+
+            <!-- BƯỚC 2: GIẢI MÃ ĐIỂM ĐỐI THỦ -->
+            <div class="text-xs tracking-widest text-zinc-400 mb-1">BƯỚC 2 // GIẢI MÃ ĐIỂM ĐỐI THỦ (SB)</div>
+            <p class="text-xs text-zinc-500 mb-1">
+                Từ Mystery Value, các lá đã lật và điểm của bạn, hãy tính điểm của đối thủ (SB) rồi nhập vào đây.
                 Giải đúng sẽ lộ kết luận hơn/thua. Bạn có tối đa 3 lần thử mỗi ván.
             </p>
+            <p id="decrypt-requirement" class="text-xs text-yellow-300 mb-3 min-h-[1rem]"></p>
             <div class="flex flex-wrap items-center gap-3">
                 <input id="math-input" type="number" step="any" inputmode="decimal"
                        placeholder="Nhập SB..."
@@ -453,6 +492,7 @@ const API = {
     LOGIN: "/api/auth/login",
     REGISTER: "/api/auth/register",
     LEADERBOARD: "/api/leaderboard",
+    ME: "/api/auth/me",
     START: "/api/game/start",
     BOT_TURN: "/api/game/bot-turn",
     SHOWDOWN: "/api/game/showdown",
@@ -461,10 +501,13 @@ const API = {
 const TURN_SECONDS = 30;
 const TIMER_WARNING_SECONDS = 10;
 const DECRYPT_MAX_ATTEMPTS = 3;
+const BOARD_LABELS = ["X", "Y", "Z", "#4", "#5"];   // Tên 5 lá bí ẩn trên bàn
+const BOARD_SIZE = BOARD_LABELS.length;
 const DEFAULT_ELO = 1000;
 const SHOWDOWN_DELAY_MS = 900;
 const STORAGE_ELO = "enigma_player_elo";
 const STORAGE_USER = "enigma_user";
+const STORAGE_TOKEN = "enigma_token";
 
 // Dữ liệu demo hiển thị khi API bảng xếp hạng chưa sẵn sàng
 const DEMO_LEADERBOARD = [
@@ -484,6 +527,7 @@ const state = {
     busy: false,
 
     user: null,             // {id, username, elo, pvp_wins, pvp_losses} hoặc null
+    token: null,            // Token đăng nhập (gửi qua header Authorization)
     playerElo: DEFAULT_ELO,
 
     gameId: null,
@@ -505,6 +549,13 @@ const state = {
 
     decryptLeft: DECRYPT_MAX_ATTEMPTS,
     decrypted: false,
+
+    // Lá bí ẩn: mặc định úp, chỉ lật khi người chơi giải đúng phép tính của lá đó
+    revealed: Array(BOARD_SIZE).fill(false),  // revealed[i] = true khi lá i đã lật
+    clues: [],                                // clues[i] = { text, answer } của lá i
+    activeCard: 0,                            // Lá úp đang được chọn để giải
+    justRevealed: -1,                         // Lá vừa lật (để chạy hiệu ứng lật)
+    dealAnimation: false,                     // true ở lần vẽ đầu tiên của ván mới
 
     authMode: "login",      // 'login' | 'register'
 };
@@ -542,11 +593,16 @@ function setStatus(message, type = "info") {
 
 /** Gửi POST JSON, trả về dữ liệu; ném Error có thông báo thân thiện nếu thất bại. */
 async function apiPost(url, body) {
+    const headers = { "Content-Type": "application/json" };
+    if (state.token) {
+        headers["Authorization"] = `Bearer ${state.token}`;
+    }
+
     let response;
     try {
         response = await fetch(url, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(body || {}),
         });
     } catch (networkError) {
@@ -565,20 +621,77 @@ async function apiPost(url, body) {
     if (!response.ok || !data.success) {
         const error = new Error(data.error || data.message || `Yêu cầu thất bại (HTTP ${response.status}).`);
         error.status = response.status;
+        // Phiên đăng nhập hết hạn hoặc bị từ chối (trừ chính lần đăng nhập)
+        if (response.status === 401 && state.token && url !== API.LOGIN) {
+            expireSession();
+        }
         throw error;
     }
     return data;
 }
 
-/** Tạo phần tử lá bài. */
-function createCard(value, label = "", hidden = false, delayIndex = 0) {
+/** Đồng bộ Elo và thống kê mới nhất của tài khoản từ server (GET /api/auth/me). */
+async function refreshSession() {
+    if (!state.token) {
+        return;
+    }
+    try {
+        const response = await fetch(API.ME, {
+            headers: { "Authorization": `Bearer ${state.token}` },
+        });
+        if (response.status === 401) {
+            expireSession();
+            return;
+        }
+        const data = await response.json();
+        if (response.ok && data.success) {
+            state.user = data.user;
+            state.playerElo = data.user.elo;
+            persistData();
+            renderHeader();
+            renderGameBoard();
+        }
+    } catch (error) {
+        /* mạng lỗi: giữ dữ liệu đã lưu, thử lại ở lần mở trang sau */
+    }
+}
+
+/** Phiên hết hạn: xóa thông tin đăng nhập và yêu cầu đăng nhập lại. */
+function expireSession() {
+    state.user = null;
+    state.token = null;
+    state.playerElo = DEFAULT_ELO;
+    persistData();
+    renderHeader();
+    setStatus("Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.", "warning");
+}
+
+/**
+ * Tạo phần tử lá bài.
+ * @param {number|string} value   Giá trị hiển thị (bị bỏ qua khi hidden = true).
+ * @param {string} label          Nhãn phía trên lá bài (X, Y, Z, ...).
+ * @param {boolean} hidden        true -> lá úp, hiện dấu '?'.
+ * @param {number} delayIndex     Thứ tự lá, dùng để so le hiệu ứng chia bài.
+ * @param {object} options        { animation: 'deal' | 'flip' | null, active, dim, onClick }
+ */
+function createCard(value, label = "", hidden = false, delayIndex = 0, options = {}) {
+    // Mặc định chỉ chạy hiệu ứng chia bài ở lần vẽ đầu tiên của ván mới
+    const animation = options.animation !== undefined
+        ? options.animation
+        : (state.dealAnimation ? "deal" : null);
+
     const wrap = document.createElement("div");
-    wrap.className = "flex flex-col items-center gap-1 card-deal";
-    wrap.style.animationDelay = `${delayIndex * 90}ms`;
+    wrap.className = "flex flex-col items-center gap-1";
+    if (animation === "deal") {
+        wrap.classList.add("card-deal");
+        wrap.style.animationDelay = `${delayIndex * 90}ms`;
+    } else if (animation === "flip") {
+        wrap.classList.add("card-flip");
+    }
 
     if (label) {
         const labelEl = document.createElement("span");
-        labelEl.className = "text-xs font-mono text-fuchsia-400";
+        labelEl.className = "text-xs font-mono " + (options.active ? "text-fuchsia-300 font-bold" : "text-fuchsia-400");
         labelEl.textContent = label;
         wrap.appendChild(labelEl);
     }
@@ -590,6 +703,31 @@ function createCard(value, label = "", hidden = false, delayIndex = 0) {
         : "w-16 h-24 flex items-center justify-center rounded-lg border-2 glow-cyan " +
           "bg-zinc-950 text-cyan-300 text-3xl font-display font-bold";
     card.textContent = hidden ? "?" : String(value);
+
+    // Lá đang được chọn để giải: viền hồng phát sáng
+    if (options.active) {
+        card.classList.remove("border-zinc-600");
+        card.classList.add("glow-pink", "text-fuchsia-300");
+    }
+    // Lá được hệ thống mở cuối ván (người chơi chưa tự giải): làm mờ
+    if (options.dim) {
+        card.classList.add("opacity-50");
+    }
+    // Lá úp bấm được để chọn
+    if (typeof options.onClick === "function") {
+        card.classList.add("card-selectable");
+        card.setAttribute("role", "button");
+        card.setAttribute("tabindex", "0");
+        card.setAttribute("aria-label", `Chọn lá ${label} để giải`);
+        card.addEventListener("click", options.onClick);
+        card.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                options.onClick();
+            }
+        });
+    }
+
     wrap.appendChild(card);
     return wrap;
 }
@@ -627,22 +765,30 @@ function loadStoredData() {
     try {
         const raw = localStorage.getItem(STORAGE_USER);
         state.user = raw ? JSON.parse(raw) : null;
+        state.token = localStorage.getItem(STORAGE_TOKEN) || null;
+        // Có thông tin user nhưng thiếu token (dữ liệu cũ) thì coi như chưa đăng nhập
+        if (!state.token) {
+            state.user = null;
+        }
         if (state.user && Number.isFinite(state.user.elo)) {
             state.playerElo = state.user.elo;
         }
     } catch (e) {
         state.user = null;
+        state.token = null;
     }
 }
 
 function persistData() {
     try {
         localStorage.setItem(STORAGE_ELO, String(state.playerElo));
-        if (state.user) {
+        if (state.user && state.token) {
             state.user.elo = state.playerElo;
             localStorage.setItem(STORAGE_USER, JSON.stringify(state.user));
+            localStorage.setItem(STORAGE_TOKEN, state.token);
         } else {
             localStorage.removeItem(STORAGE_USER);
+            localStorage.removeItem(STORAGE_TOKEN);
         }
     } catch (e) {
         /* localStorage có thể bị chặn: bỏ qua */
@@ -668,8 +814,11 @@ function renderHeader() {
 
 function logout() {
     state.user = null;
+    state.token = null;
+    state.playerElo = DEFAULT_ELO;  // khách bắt đầu lại từ Elo mặc định
     persistData();
     renderHeader();
+    renderGameBoard();
 }
 
 // ======================================================================
@@ -717,13 +866,15 @@ function setAuthMessage(message, type = "error") {
 }
 
 /** Lưu người dùng sau khi đăng nhập thành công. */
-function applyLoggedInUser(user) {
+function applyLoggedInUser(user, token) {
     state.user = user;
+    state.token = token || null;
     if (Number.isFinite(user.elo)) {
         state.playerElo = user.elo;
     }
     persistData();
     renderHeader();
+    renderGameBoard();
 }
 
 async function handleAuthSubmit(event) {
@@ -761,7 +912,10 @@ async function handleAuthSubmit(event) {
             await apiPost(API.REGISTER, { username, password });
         }
         const data = await apiPost(API.LOGIN, { username, password });
-        applyLoggedInUser(data.user);
+        if (!data.token) {
+            throw new Error("Máy chủ không trả về token đăng nhập.");
+        }
+        applyLoggedInUser(data.user, data.token);
         closeAuthModal();
         loadLeaderboard();
     } catch (error) {
@@ -932,13 +1086,163 @@ function resetDecryptPanel() {
     $("decrypt-feedback").textContent = "";
 }
 
+// ----------------------------------------------------------------------
+// LẬT LÁ BÍ ẨN
+// Cả 5 lá bàn (X, Y, Z, #4, #5) bắt đầu ở trạng thái úp. Mỗi lá có một phép
+// tính gợi ý; chỉ khi người chơi nhập đúng giá trị của lá đó thì lá mới lật.
+// ----------------------------------------------------------------------
+
+/** Lá nào bắt buộc phải lật mới tính được SB (tùy công thức của chế độ). */
+function requiredCardIndexes() {
+    return state.mode === "EXTREME" ? [0, 1, 2] : [0];   // EXTREME: X, Y, Z | còn lại: X
+}
+
+/** Các lá cần cho công thức SB mà người chơi chưa lật. */
+function missingRequiredCards() {
+    return requiredCardIndexes().filter((i) => !state.revealed[i]);
+}
+
+function randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/** Hiển thị số âm bằng dấu trừ đúng (−) thay vì gạch nối. */
+function fmtNumber(n) {
+    return String(n).replace("-", "−");
+}
+
+/**
+ * Tạo phép tính gợi ý cho một lá. Đáp án luôn là giá trị lá bài (số nguyên).
+ *   - Hai lá đầu (X, Y): phép tính một bước.
+ *   - Các lá sau (Z, #4, #5): phép tính hai bước.
+ */
+function buildClue(value, label, index) {
+    const k = randomInt(2, 9);
+    const m = randomInt(1, 9);
+    const kind = randomInt(0, 2);
+
+    if (index < 2) {
+        if (kind === 0) return { text: `${label} + ${k} = ${fmtNumber(value + k)}`, answer: value };
+        if (kind === 1) return { text: `${label} − ${k} = ${fmtNumber(value - k)}`, answer: value };
+        return { text: `${label} × ${k} = ${fmtNumber(value * k)}`, answer: value };
+    }
+    if (kind === 0) return { text: `${label} × ${k} + ${m} = ${fmtNumber(value * k + m)}`, answer: value };
+    if (kind === 1) return { text: `${label} × ${k} − ${m} = ${fmtNumber(value * k - m)}`, answer: value };
+    return { text: `(${label} + ${m}) × ${k} = ${fmtNumber((value + m) * k)}`, answer: value };
+}
+
+/** Khởi tạo lại trạng thái các lá bí ẩn cho ván mới: tất cả úp, tạo phép tính. */
+function resetRevealPanel() {
+    state.revealed = Array(state.boardCards.length).fill(false);
+    state.clues = state.boardCards.map((value, i) => buildClue(value, BOARD_LABELS[i] || `#${i + 1}`, i));
+    state.activeCard = state.boardCards.length ? 0 : -1;
+    state.justRevealed = -1;
+    $("reveal-input").value = "";
+    $("reveal-feedback").textContent = "";
+}
+
+function setRevealFeedback(message, type) {
+    const colors = { success: "text-green-400", error: "text-red-400", warning: "text-yellow-300" };
+    const el = $("reveal-feedback");
+    el.className = `mt-2 text-sm min-h-[1.25rem] ${colors[type] || ""}`;
+    el.textContent = message;
+}
+
+/** Chọn một lá úp để giải (bấm trực tiếp vào lá bài). */
+function selectCard(index) {
+    if (state.phase !== "playing" || state.busy || state.revealed[index]) {
+        return;
+    }
+    state.activeCard = index;
+    $("reveal-input").value = "";
+    $("reveal-feedback").textContent = "";
+    renderGameBoard();
+    $("reveal-input").focus();
+}
+
+/** Kiểm tra đáp án của lá đang chọn; đúng thì lật lá đó. */
+function submitReveal() {
+    if (state.phase !== "playing" || state.busy) {
+        return;
+    }
+    const index = state.activeCard;
+    if (index < 0 || state.revealed[index]) {
+        return;
+    }
+
+    const raw = $("reveal-input").value.trim();
+    const guess = Number(raw);
+    if (raw === "" || !Number.isFinite(guess)) {
+        setRevealFeedback("Vui lòng nhập một con số hợp lệ.", "warning");
+        return;
+    }
+
+    const label = BOARD_LABELS[index] || `#${index + 1}`;
+    if (Math.abs(guess - state.clues[index].answer) < 1e-9) {
+        state.revealed[index] = true;
+        state.justRevealed = index;                          // chạy hiệu ứng lật cho lá này
+        state.activeCard = state.revealed.findIndex((opened) => !opened);  // lá úp kế tiếp, -1 nếu hết
+        $("reveal-input").value = "";
+        setRevealFeedback(`Đã lật lá ${label}: ${state.clues[index].answer}`, "success");
+        renderGameBoard();
+        if (state.activeCard !== -1) {
+            $("reveal-input").focus();
+        }
+    } else {
+        setRevealFeedback(`Chưa đúng, hãy tính lại lá ${label}.`, "error");
+        $("reveal-input").select();
+    }
+}
+
+/** Cập nhật phần Bước 1 (phép tính, tiến độ, nút) và yêu cầu của Bước 2. */
+function renderRevealPanel() {
+    const total = state.boardCards.length;
+    const opened = state.revealed.filter(Boolean).length;
+    setText("reveal-progress", `(${opened}/${total || BOARD_SIZE})`);
+
+    const index = state.activeCard;
+    const playing = state.phase === "playing";
+    let clueText = "--";
+    if (total > 0 && playing && index >= 0) {
+        clueText = `Lá ${BOARD_LABELS[index] || `#${index + 1}`}:  ${state.clues[index].text}`;
+    } else if (total > 0 && opened === total) {
+        clueText = "Đã lật toàn bộ lá bí ẩn.";
+    } else if (total > 0 && state.phase !== "idle") {
+        clueText = "Hết lượt giải mã lá bí ẩn.";
+    }
+    setText("clue-display", clueText);
+
+    const canReveal = playing && !state.busy && index >= 0;
+    setDisabled("btn-reveal", !canReveal);
+    setDisabled("reveal-input", !canReveal);
+
+    // Bước 2 chỉ mở khi đã lật đủ các lá mà công thức SB cần
+    let requirement = "";
+    if (playing && !state.decrypted) {
+        const missing = missingRequiredCards();
+        requirement = missing.length > 0
+            ? `Cần lật lá ${missing.map((i) => BOARD_LABELS[i]).join(", ")} ở Bước 1 trước khi tính SB.`
+            : "Đã đủ dữ kiện: hãy tính SB.";
+    }
+    setText("decrypt-requirement", requirement);
+}
+
 function submitDecrypt() {
     if (state.phase !== "playing" || state.busy || state.decrypted || state.decryptLeft <= 0) {
         return;
     }
 
-    const raw = $("math-input").value.trim();
     const feedback = $("decrypt-feedback");
+
+    // Chưa lật đủ lá cần thiết thì chưa có dữ kiện để tính SB
+    const missing = missingRequiredCards();
+    if (missing.length > 0) {
+        feedback.className = "mt-3 text-sm min-h-[1.5rem] text-yellow-300";
+        feedback.textContent = `Hãy lật lá ${missing.map((i) => BOARD_LABELS[i]).join(", ")} trước khi giải mã SB.`;
+        return;
+    }
+
+    const raw = $("math-input").value.trim();
     const guess = Number(raw);
 
     if (raw === "" || !Number.isFinite(guess)) {
@@ -988,12 +1292,21 @@ function renderGameBoard() {
     state.playerHand.forEach((value, i) => handEl.appendChild(createCard(value, `Lá ${i + 1}`, false, i)));
     setText("player-score", state.playerHand.length ? String(sum(state.playerHand)) : "--");
 
-    // Bài bàn: 3 lá đầu mang nhãn X, Y, Z
+    // Bài bàn: 5 lá bí ẩn (X, Y, Z, #4, #5). Mặc định ÚP; chỉ hiện số khi người chơi
+    // đã giải đúng lá đó. Hết ván (showdown) hệ thống mở nốt các lá còn úp (làm mờ).
     const boardEl = $("board-cards");
     boardEl.replaceChildren();
-    const labels = ["X", "Y", "Z"];
+    const gameOver = state.phase === "finished";
+    const canPick = state.phase === "playing" && !state.busy;
     state.boardCards.forEach((value, i) => {
-        boardEl.appendChild(createCard(value, i < labels.length ? labels[i] : `#${i + 1}`, false, i));
+        const opened = state.revealed[i] === true;
+        const faceUp = opened || gameOver;
+        boardEl.appendChild(createCard(value, BOARD_LABELS[i] || `#${i + 1}`, !faceUp, i, {
+            animation: state.justRevealed === i ? "flip" : undefined,
+            active: !faceUp && state.phase === "playing" && i === state.activeCard,
+            dim: gameOver && !opened,
+            onClick: !faceUp && canPick ? () => selectCard(i) : null,
+        }));
     });
 
     // Bài Bot: úp, lộ khi showdown
@@ -1024,11 +1337,18 @@ function renderGameBoard() {
     const canAct = state.phase === "playing" && !state.busy;
     setDisabled("btn-call", !canAct);
     setDisabled("btn-fold", !canAct);
-    const canDecrypt = canAct && !state.decrypted && state.decryptLeft > 0;
+    // Giải mã SB chỉ mở khi đã lật đủ các lá bí ẩn mà công thức cần
+    const canDecrypt = canAct && !state.decrypted && state.decryptLeft > 0
+        && missingRequiredCards().length === 0;
     setDisabled("btn-decrypt", !canDecrypt);
     setDisabled("math-input", !canDecrypt);
 
+    renderRevealPanel();
     renderTimer();
+
+    // Hiệu ứng (chia bài / lật bài) chỉ chạy một lần cho mỗi lần vẽ
+    state.dealAnimation = false;
+    state.justRevealed = -1;
 }
 
 function renderShowdownResult() {
@@ -1098,7 +1418,9 @@ async function startNewMatch(mode) {
         state.phase = "playing";
         state.busy = false;
 
+        resetRevealPanel();     // 5 lá bí ẩn: tất cả úp, tạo phép tính gợi ý
         resetDecryptPanel();
+        state.dealAnimation = true;
         renderGameBoard();
         setStatus("Ván đấu bắt đầu! Giải mã điểm đối thủ rồi chọn THEO hoặc BỎ BÀI.", "success");
         startCountdown(TURN_SECONDS);
@@ -1236,6 +1558,10 @@ function init() {
     $("btn-call").addEventListener("click", () => playerAction("CALL"));
     $("btn-fold").addEventListener("click", () => playerAction("FOLD"));
     $("btn-decrypt").addEventListener("click", submitDecrypt);
+    $("btn-reveal").addEventListener("click", submitReveal);
+    $("reveal-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submitReveal();
+    });
     $("math-input").addEventListener("keydown", (e) => {
         if (e.key === "Enter") submitDecrypt();
     });
@@ -1271,6 +1597,7 @@ function init() {
     // Dữ liệu từ server
     checkConnection();
     loadLeaderboard();
+    refreshSession();  // đồng bộ Elo thật của tài khoản (nếu đang đăng nhập)
 }
 
 if (document.readyState === "loading") {
