@@ -306,7 +306,7 @@
             </div>
             <div class="text-sm">
                 <span class="text-zinc-500">THỜI GIAN:</span>
-                <span id="timer-display" class="neon-cyan font-bold text-lg">30s</span>
+                <span id="timer-display" class="neon-cyan font-bold text-lg">3m 00s</span>
             </div>
         </div>
 
@@ -498,7 +498,8 @@ const API = {
     SHOWDOWN: "/api/game/showdown",
 };
 
-const TURN_SECONDS = 30;
+const MODE_AI_SECONDS = 180;             // Thời gian Mode 1 (Đấu AI): 3 phút = 180 giây
+const TURN_SECONDS = 30;                // Thời gian mặc định cho các mode khác (PVP, Extreme)
 const TIMER_WARNING_SECONDS = 10;
 const DECRYPT_MAX_ATTEMPTS = 3;
 const BOARD_LABELS = ["X", "Y", "Z", "#4", "#5"];   // Tên 5 lá bí ẩn trên bàn
@@ -544,7 +545,7 @@ const state = {
     botRaiseAmount: 0,
     result: null,
 
-    timeLeft: TURN_SECONDS,
+    timeLeft: MODE_AI_SECONDS,
     timerId: null,
 
     decryptLeft: DECRYPT_MAX_ATTEMPTS,
@@ -701,24 +702,21 @@ function createCard(value, label = "", hidden = false, delayIndex = 0, options =
         ? "w-16 h-24 flex items-center justify-center rounded-lg border-2 border-zinc-600 " +
           "bg-zinc-900 text-zinc-500 text-3xl font-display font-bold"
         : "w-16 h-24 flex items-center justify-center rounded-lg border-2 glow-cyan " +
-          "bg-zinc-950 text-cyan-300 text-3xl font-display font-bold";
-    card.textContent = hidden ? "?" : String(value);
+          "bg-zinc-950 text-cyan-300 text-2xl font-display font-bold";
 
-    // Lá đang được chọn để giải: viền hồng phát sáng
-    if (options.active) {
-        card.classList.remove("border-zinc-600");
-        card.classList.add("glow-pink", "text-fuchsia-300");
-    }
-    // Lá được hệ thống mở cuối ván (người chơi chưa tự giải): làm mờ
     if (options.dim) {
-        card.classList.add("opacity-50");
+        card.classList.add("opacity-40");
     }
-    // Lá úp bấm được để chọn
-    if (typeof options.onClick === "function") {
+
+    if (options.onClick) {
         card.classList.add("card-selectable");
-        card.setAttribute("role", "button");
-        card.setAttribute("tabindex", "0");
-        card.setAttribute("aria-label", `Chọn lá ${label} để giải`);
+        if (options.active) {
+            card.classList.remove("border-zinc-600");
+            card.classList.add("border-fuchsia-400", "glow-pink");
+        }
+        card.tabIndex = 0;
+        card.role = "button";
+        card.ariaLabel = `Lựa chọn lá bài ${label}`;
         card.addEventListener("click", options.onClick);
         card.addEventListener("keydown", (e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -728,110 +726,572 @@ function createCard(value, label = "", hidden = false, delayIndex = 0, options =
         });
     }
 
+    card.textContent = hidden ? "?" : value;
     wrap.appendChild(card);
     return wrap;
 }
 
-// ======================================================================
-// TRẠNG THÁI KẾT NỐI
-// ======================================================================
-function setConnection(status, text) {
-    const dot = $("conn-dot");
-    const label = $("conn-text");
-    dot.classList.remove("bg-green-400", "bg-red-500", "bg-yellow-400", "animate-pulse");
+/** Đặt lại đếm ngược thời gian dựa theo Mode chơi. */
+function resetTimer() {
+    clearInterval(state.timerId);
+    state.timeLeft = (state.mode === "AI") ? MODE_AI_SECONDS : TURN_SECONDS;
+    renderTimer();
 
-    if (status === "online") {
-        dot.classList.add("bg-green-400");
-        label.textContent = text || "ONLINE";
-    } else if (status === "offline") {
-        dot.classList.add("bg-red-500");
-        label.textContent = text || "OFFLINE";
+    state.timerId = setInterval(() => {
+        if (state.phase !== "playing") return;
+        state.timeLeft -= 1;
+        renderTimer();
+
+        if (state.timeLeft <= 0) {
+            clearInterval(state.timerId);
+            handleTimeout();
+        }
+    }, 1000);
+}
+
+/** Cập nhật thanh đếm ngược thời gian trên giao diện. */
+function renderTimer() {
+    const totalSeconds = (state.mode === "AI") ? MODE_AI_SECONDS : TURN_SECONDS;
+    const mins = Math.floor(state.timeLeft / 60);
+    const secs = state.timeLeft % 60;
+
+    let timeStr = "";
+    if (mins > 0) {
+        timeStr = `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
     } else {
-        dot.classList.add("bg-yellow-400", "animate-pulse");
-        label.textContent = text || "ĐANG KẾT NỐI...";
+        timeStr = `${secs}s`;
+    }
+
+    const timerDisplay = $("timer-display");
+    if (timerDisplay) {
+        timerDisplay.textContent = timeStr;
+        if (state.timeLeft <= TIMER_WARNING_SECONDS) {
+            timerDisplay.className = "neon-red font-bold text-lg animate-pulse";
+        } else {
+            timerDisplay.className = "neon-cyan font-bold text-lg";
+        }
+    }
+
+    const timerBar = $("timer-bar");
+    if (timerBar) {
+        const percent = Math.max(0, Math.min(100, (state.timeLeft / totalSeconds) * 100));
+        timerBar.style.width = `${percent}%`;
+        timerBar.style.backgroundColor = state.timeLeft <= TIMER_WARNING_SECONDS ? "#f87171" : "#22d3ee";
     }
 }
 
-// ======================================================================
-// LƯU TRỮ CỤC BỘ (Elo, user)
-// ======================================================================
-function loadStoredData() {
-    try {
-        const elo = parseInt(localStorage.getItem(STORAGE_ELO), 10);
-        state.playerElo = Number.isFinite(elo) && elo >= 0 ? elo : DEFAULT_ELO;
-    } catch (e) {
-        state.playerElo = DEFAULT_ELO;
-    }
-    try {
-        const raw = localStorage.getItem(STORAGE_USER);
-        state.user = raw ? JSON.parse(raw) : null;
-        state.token = localStorage.getItem(STORAGE_TOKEN) || null;
-        // Có thông tin user nhưng thiếu token (dữ liệu cũ) thì coi như chưa đăng nhập
-        if (!state.token) {
-            state.user = null;
-        }
-        if (state.user && Number.isFinite(state.user.elo)) {
-            state.playerElo = state.user.elo;
-        }
-    } catch (e) {
-        state.user = null;
-        state.token = null;
+function handleTimeout() {
+    setStatus("Hết thời gian! Hệ thống tự động thực hiện hành động BỎ BÀI (FOLD).", "error");
+    handleFold();
+}
+
+function setConnection(status) {
+    const dot = $("conn-dot");
+    const text = $("conn-text");
+    if (!dot || !text) return;
+
+    if (status === "online") {
+        dot.className = "w-2.5 h-2.5 rounded-full bg-green-400";
+        text.textContent = "ONLINE";
+    } else {
+        dot.className = "w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse";
+        text.textContent = "MẤT KẾT NỐI";
     }
 }
 
 function persistData() {
-    try {
-        localStorage.setItem(STORAGE_ELO, String(state.playerElo));
-        if (state.user && state.token) {
-            state.user.elo = state.playerElo;
-            localStorage.setItem(STORAGE_USER, JSON.stringify(state.user));
-            localStorage.setItem(STORAGE_TOKEN, state.token);
+    localStorage.setItem(STORAGE_ELO, state.playerElo);
+    if (state.user) {
+        localStorage.setItem(STORAGE_USER, JSON.stringify(state.user));
+    } else {
+        localStorage.removeItem(STORAGE_USER);
+    }
+    if (state.token) {
+        localStorage.setItem(STORAGE_TOKEN, state.token);
+    } else {
+        localStorage.removeItem(STORAGE_TOKEN);
+    }
+}
+
+function renderHeader() {
+    const guestBlock = $("auth-guest");
+    const userBlock = $("auth-user");
+
+    if (state.user) {
+        guestBlock.classList.add("hidden");
+        userBlock.classList.remove("hidden");
+        userBlock.classList.add("flex");
+        setText("user-name", state.user.username);
+        setText("user-elo", state.user.elo);
+    } else {
+        guestBlock.classList.remove("hidden");
+        userBlock.classList.add("hidden");
+        userBlock.classList.remove("flex");
+    }
+    setText("player-elo-display", state.playerElo);
+}
+
+function renderGameBoard() {
+    setText("mode-display", state.mode);
+    setText("player-elo-display", state.playerElo);
+    setText("pot-value", state.pot);
+    setText("bot-elo-display", state.botElo);
+
+    const botHandEl = $("bot-hand");
+    botHandEl.innerHTML = "";
+    if (state.phase === "finished" && state.result && state.result.bot_hand) {
+        state.result.bot_hand.forEach((cardVal, i) => {
+            botHandEl.appendChild(createCard(cardVal, `Lá ${i + 1}`, false, i));
+        });
+    } else {
+        [1, 2].forEach((num, i) => {
+            botHandEl.appendChild(createCard("?", `Lá ${num}`, true, i));
+        });
+    }
+
+    const boardCardsEl = $("board-cards");
+    boardCardsEl.innerHTML = "";
+    state.boardCards.forEach((cardVal, i) => {
+        const isRevealed = state.revealed[i];
+        const label = BOARD_LABELS[i] || `#${i + 1}`;
+        const isFlipTarget = (i === state.justRevealed);
+        const isActive = (!isRevealed && i === state.activeCard);
+
+        const cardOptions = {
+            animation: isFlipTarget ? "flip" : undefined,
+            active: isActive,
+            onClick: !isRevealed ? () => selectCardToReveal(i) : null,
+        };
+
+        const cardNode = createCard(
+            isRevealed ? cardVal : "?",
+            label,
+            !isRevealed,
+            i,
+            cardOptions
+        );
+        boardCardsEl.appendChild(cardNode);
+    });
+
+    state.justRevealed = -1;
+
+    const playerHandEl = $("player-hand");
+    playerHandEl.innerHTML = "";
+    state.playerHand.forEach((cardVal, i) => {
+        playerHandEl.appendChild(createCard(cardVal, `Lá ${i + 1}`, false, i));
+    });
+
+    setText("player-score", sum(state.playerHand) || "--");
+    setText("mystery-value", state.mysteryValue !== null ? state.mysteryValue : "--");
+
+    const formulaEl = $("formula-display");
+    if (state.mode === "EXTREME") {
+        formulaEl.textContent = "Công thức: M = (SA × X) + (SB × Y) - Z";
+    } else {
+        formulaEl.textContent = "Công thức: M = (SA + SB) × X";
+    }
+
+    renderTerminal();
+}
+
+function renderTerminal() {
+    const revealedCount = state.revealed.filter(Boolean).length;
+    setText("reveal-progress", `(${revealedCount}/${BOARD_SIZE})`);
+
+    const clueEl = $("clue-display");
+    const activeClue = state.clues[state.activeCard];
+
+    if (revealedCount === BOARD_SIZE) {
+        clueEl.textContent = "TẤT CẢ LÁ BÍ ẨN ĐÃ ĐƯỢC LẬT!";
+        clueEl.className = "font-display text-base neon-green mb-3 min-h-[1.75rem]";
+    } else if (activeClue && !state.revealed[state.activeCard]) {
+        const label = BOARD_LABELS[state.activeCard] || `#${state.activeCard + 1}`;
+        clueEl.textContent = `GỢI Ý LÁ [${label}]: ${activeClue.text} = ?`;
+        clueEl.className = "font-display text-lg neon-cyan mb-3 min-h-[1.75rem]";
+    } else {
+        clueEl.textContent = "Bấm vào một lá bài úp để chọn gợi ý giải mã.";
+        clueEl.className = "font-display text-sm text-zinc-400 mb-3 min-h-[1.75rem]";
+    }
+
+    const reqEl = $("decrypt-requirement");
+    if (reqEl) {
+        if (state.mode === "EXTREME") {
+            const needX = state.revealed[0];
+            const needY = state.revealed[1];
+            const needZ = state.revealed[2];
+            if (!needX || !needY || !needZ) {
+                reqEl.textContent = "Yêu cầu: Lật các lá X, Y, Z trước để giải mã SB.";
+            } else {
+                reqEl.textContent = "Đủ dữ kiện: Có thể tính toán chính xác SB.";
+            }
         } else {
-            localStorage.removeItem(STORAGE_USER);
-            localStorage.removeItem(STORAGE_TOKEN);
+            if (!state.revealed[0]) {
+                reqEl.textContent = "Yêu cầu: Lật lá X trước để giải mã SB.";
+            } else {
+                reqEl.textContent = "Đủ dữ kiện: Có thể tính toán chính xác SB.";
+            }
+        }
+    }
+
+    setText("decrypt-left", state.decryptLeft);
+}
+
+function selectCardToReveal(index) {
+    if (state.revealed[index]) return;
+    state.activeCard = index;
+    $("reveal-feedback").textContent = "";
+    $("reveal-input").value = "";
+    renderGameBoard();
+    $("reveal-input").focus();
+}
+
+function handleReveal() {
+    if (state.phase !== "playing") return;
+
+    const inputEl = $("reveal-input");
+    const feedbackEl = $("reveal-feedback");
+    const userVal = parseFloat(inputEl.value);
+
+    if (isNaN(userVal)) {
+        feedbackEl.className = "mt-2 text-sm text-red-400";
+        feedbackEl.textContent = "Vui lòng nhập một số hợp lệ!";
+        return;
+    }
+
+    const currentClue = state.clues[state.activeCard];
+    if (!currentClue) {
+        feedbackEl.className = "mt-2 text-sm text-yellow-300";
+        feedbackEl.textContent = "Hãy chọn một lá bài úp để giải.";
+        return;
+    }
+
+    const expected = currentClue.answer;
+    if (Math.abs(userVal - expected) < 0.001) {
+        state.revealed[state.activeCard] = true;
+        state.justRevealed = state.activeCard;
+
+        feedbackEl.className = "mt-2 text-sm text-green-400";
+        feedbackEl.textContent = `Chính xác! Lá [${BOARD_LABELS[state.activeCard]}] đã được lật mở.`;
+        inputEl.value = "";
+
+        const firstUnrevealed = state.revealed.findIndex((rev) => !rev);
+        if (firstUnrevealed !== -1) {
+            state.activeCard = firstUnrevealed;
+        }
+
+        renderGameBoard();
+    } else {
+        feedbackEl.className = "mt-2 text-sm text-red-400";
+        feedbackEl.textContent = "Kết quả chưa đúng. Hãy thử tính lại!";
+    }
+}
+
+function handleDecrypt() {
+    if (state.phase !== "playing") return;
+
+    const inputEl = $("math-input");
+    const feedbackEl = $("decrypt-feedback");
+
+    if (state.decryptLeft <= 0) {
+        feedbackEl.className = "mt-3 text-sm text-red-400";
+        feedbackEl.textContent = "Bạn đã hết lượt thử giải mã SB trong ván này!";
+        return;
+    }
+
+    const val = parseInt(inputEl.value, 10);
+    if (isNaN(val)) {
+        feedbackEl.className = "mt-3 text-sm text-red-400";
+        feedbackEl.textContent = "Vui lòng nhập một số nguyên cho điểm đối thủ (SB).";
+        return;
+    }
+
+    state.decryptLeft -= 1;
+    setText("decrypt-left", state.decryptLeft);
+
+    const actualSB = state.result ? sum(state.result.bot_hand) : null;
+    const playerSA = sum(state.playerHand);
+
+    let isCorrect = false;
+    if (actualSB !== null) {
+        isCorrect = (val === actualSB);
+    } else {
+        if (state.mode === "EXTREME") {
+            const X = state.boardCards[0];
+            const Y = state.boardCards[1];
+            const Z = state.boardCards[2];
+            const calcSB = (state.mysteryValue + Z - (playerSA * X)) / Y;
+            isCorrect = Math.abs(val - calcSB) < 0.001;
+        } else {
+            const X = state.boardCards[0];
+            const calcSB = (state.mysteryValue / X) - playerSA;
+            isCorrect = Math.abs(val - calcSB) < 0.001;
+        }
+    }
+
+    if (isCorrect) {
+        state.decrypted = true;
+        feedbackEl.className = "mt-3 text-sm text-green-400 font-bold";
+        const estimatedSB = val;
+        let diffText = "";
+        if (playerSA > estimatedSB) diffText = "Bạn đang BẮT BÀI ĐỐI THỦ (Điểm của bạn CAO HƠN)!";
+        else if (playerSA < estimatedSB) diffText = "CẢNH BÁO: Điểm đối thủ CAO HƠN bạn!";
+        else diffText = "XÁC NHẬN: Điểm hai bên BẰNG NHAU!";
+
+        feedbackEl.textContent = `GIẢI MÃ THÀNH CÔNG! SB = ${val}. ${diffText}`;
+    } else {
+        feedbackEl.className = "mt-3 text-sm text-red-400";
+        feedbackEl.textContent = `Kết quả SB = ${val} KHÔNG CHÍNH XÁC! Lượt thử còn lại: ${state.decryptLeft}.`;
+    }
+}
+
+async function startMatch(mode) {
+    if (state.busy) return;
+
+    if (mode === "PVP" && !state.user) {
+        openAuthModal("login");
+        setStatus("Vui lòng đăng nhập tài khoản để tham gia Đấu Xếp Hạng.", "warning");
+        return;
+    }
+
+    state.busy = true;
+    state.mode = mode;
+    state.lastMode = mode;
+    state.phase = "playing";
+    state.decrypted = false;
+    state.decryptLeft = DECRYPT_MAX_ATTEMPTS;
+    state.revealed = Array(BOARD_SIZE).fill(false);
+    state.activeCard = 0;
+    state.justRevealed = -1;
+    state.dealAnimation = true;
+
+    const selectedBotElo = parseInt($("bot-tier").value, 10) || 1500;
+    state.botElo = selectedBotElo;
+
+    switchTab("game");
+    $("result-panel").classList.add("hidden");
+    setStatus("Đang kết nối hệ thống chia bài...", "info");
+
+    try {
+        const payload = {
+            mode: state.mode,
+            bot_elo: state.botElo,
+            player_elo: state.playerElo,
+        };
+
+        const res = await apiPost(API.START, payload);
+
+        state.gameId = res.game_id;
+        state.playerHand = res.player_hand || [];
+        state.boardCards = res.board_cards || [];
+        state.mysteryValue = res.mystery_value;
+        state.pot = res.pot || 200;
+        state.clues = res.clues || [];
+
+        renderGameBoard();
+        resetTimer();
+        setStatus("Ván đấu bắt đầu! Hãy giải các lá bí ẩn và đưa ra quyết định đặt cược.", "success");
+    } catch (err) {
+        setStatus(`Không thể khởi tạo ván đấu: ${err.message}`, "error");
+        state.phase = "idle";
+    } finally {
+        state.busy = false;
+        state.dealAnimation = false;
+    }
+}
+
+async function handleCall() {
+    if (state.phase !== "playing" || state.busy) return;
+    state.busy = true;
+    state.playerAction = "CALL";
+    setStatus("Bạn đã chọn THEO (CALL). Đang chờ Bot xử lý...", "info");
+
+    try {
+        const res = await apiPost(API.BOT_TURN, {
+            game_id: state.gameId,
+            player_action: "CALL",
+        });
+
+        state.botAction = res.bot_action;
+        state.botRaiseAmount = res.raise_amount || 0;
+        state.pot = res.pot || state.pot;
+
+        setText("bot-action-display", res.bot_action === "RAISE" ? `TĂNG CƯỢC (+${res.raise_amount})` : res.bot_action);
+
+        await sleep(SHOWDOWN_DELAY_MS);
+        await performShowdown();
+    } catch (err) {
+        setStatus(`Lỗi xử lý lượt cược: ${err.message}`, "error");
+    } finally {
+        state.busy = false;
+    }
+}
+
+async function handleFold() {
+    if (state.phase !== "playing" || state.busy) return;
+    state.busy = true;
+    state.playerAction = "FOLD";
+    setStatus("Bạn quyết định BỎ BÀI (FOLD). Đang chốt kết quả...", "warning");
+
+    try {
+        await performShowdown();
+    } catch (err) {
+        setStatus(`Lỗi khi chốt kết quả: ${err.message}`, "error");
+    } finally {
+        state.busy = false;
+    }
+}
+
+async function performShowdown() {
+    state.phase = "finished";
+    clearInterval(state.timerId);
+
+    try {
+        const res = await apiPost(API.SHOWDOWN, {
+            game_id: state.gameId,
+            player_action: state.playerAction,
+        });
+
+        state.result = res;
+        state.playerElo = res.new_player_elo;
+        persistData();
+
+        state.revealed = Array(BOARD_SIZE).fill(true);
+        renderHeader();
+        renderGameBoard();
+        renderResultPanel(res);
+        refreshSession();
+    } catch (err) {
+        setStatus(`Lỗi Lật Bài Showdown: ${err.message}`, "error");
+    }
+}
+
+function renderResultPanel(res) {
+    const panel = $("result-panel");
+    const title = $("result-title");
+    const details = $("result-details");
+
+    panel.classList.remove("hidden");
+
+    if (res.winner === "PLAYER") {
+        title.textContent = "VICTORY";
+        title.className = "font-display font-black text-4xl tracking-widest mb-3 neon-green";
+    } else if (res.winner === "BOT") {
+        title.textContent = "DEFEAT";
+        title.className = "font-display font-black text-4xl tracking-widest mb-3 neon-red";
+    } else {
+        title.textContent = "DRAW";
+        title.className = "font-display font-black text-4xl tracking-widest mb-3 neon-pink";
+    }
+
+    const sa = sum(state.playerHand);
+    const sb = sum(res.bot_hand || []);
+
+    let text = `Tổng điểm của bạn (SA): ${sa}\n`;
+    text += `Tổng điểm của Bot (SB): ${sb}\n`;
+    text += `Thay đổi Elo: ${res.elo_change >= 0 ? "+" : ""}${res.elo_change} (Mới: ${res.new_player_elo})\n`;
+    text += `Diễn biến: ${res.summary || "Trận đấu kết thúc."}`;
+
+    details.textContent = text;
+}
+
+function switchTab(tabName) {
+    state.activeTab = tabName;
+    document.querySelectorAll("[data-tab-btn]").forEach((btn) => {
+        const target = btn.getAttribute("data-tab-btn");
+        if (target === tabName) {
+            btn.className = "py-2 border-b-2 border-cyan-400 text-cyan-300 transition-colors";
+        } else {
+            btn.className = "py-2 border-b-2 border-transparent text-zinc-500 hover:text-cyan-300 transition-colors";
+        }
+    });
+
+    document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
+        const target = panel.getAttribute("data-tab-panel");
+        if (target === tabName) {
+            panel.classList.remove("hidden");
+        } else {
+            panel.classList.add("hidden");
+        }
+    });
+
+    if (tabName === "lobby") {
+        loadLeaderboard();
+    }
+}
+
+async function loadLeaderboard() {
+    const tbody = $("leaderboard-body");
+    const note = $("leaderboard-note");
+
+    try {
+        const response = await fetch(API.LEADERBOARD);
+        const data = await response.json();
+
+        if (response.ok && data.success && Array.isArray(data.leaderboard)) {
+            renderLeaderboardRows(data.leaderboard);
+            if (note) note.textContent = "Cập nhật từ máy chủ";
+            return;
         }
     } catch (e) {
-        /* localStorage có thể bị chặn: bỏ qua */
+        /* nếu server API chưa hoạt động, dùng dữ liệu demo */
     }
+
+    renderLeaderboardRows(DEMO_LEADERBOARD);
+    if (note) note.textContent = "Dữ liệu mẫu (Mô phỏng)";
 }
 
-// ======================================================================
-// HEADER / TÀI KHOẢN
-// ======================================================================
-function renderHeader() {
-    const loggedIn = !!state.user;
-    $("auth-guest").classList.toggle("hidden", loggedIn);
-    $("auth-user").classList.toggle("hidden", !loggedIn);
-    $("auth-user").classList.toggle("flex", loggedIn);
-    $("auth-guest").classList.toggle("flex", !loggedIn);
+function renderLeaderboardRows(list) {
+    const tbody = $("leaderboard-body");
+    tbody.innerHTML = "";
 
-    if (loggedIn) {
-        setText("user-name", state.user.username);
-        setText("user-elo", String(state.playerElo));
+    if (!list || list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="px-5 py-6 text-center text-zinc-500">Chưa có dữ liệu xếp hạng.</td></tr>';
+        return;
     }
-    setText("player-elo-display", String(state.playerElo));
+
+    list.forEach((item, index) => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b border-zinc-900 hover:bg-zinc-900/50 transition-colors";
+        tr.innerHTML = `
+            <td class="px-5 py-3 font-bold ${index < 3 ? 'text-yellow-400' : 'text-zinc-500'}">${index + 1}</td>
+            <td class="px-5 py-3 font-mono text-cyan-200">${item.username}</td>
+            <td class="px-5 py-3 text-right font-mono neon-cyan">${item.elo}</td>
+            <td class="px-5 py-3 text-right font-mono text-green-400">${item.pvp_wins || 0}</td>
+            <td class="px-5 py-3 text-right font-mono text-red-400">${item.pvp_losses || 0}</td>
+        `;
+        tbody.appendChild(tr);
+    });
 }
 
-function logout() {
-    state.user = null;
-    state.token = null;
-    state.playerElo = DEFAULT_ELO;  // khách bắt đầu lại từ Elo mặc định
-    persistData();
-    renderHeader();
-    renderGameBoard();
-}
-
-// ======================================================================
-// MODAL AUTH
-// ======================================================================
 function openAuthModal(mode = "login") {
-    setAuthMode(mode);
-    $("auth-form").reset();
-    setAuthMessage("");
+    state.authMode = mode;
     const modal = $("auth-modal");
     modal.classList.remove("hidden");
     modal.classList.add("flex");
-    $("auth-username").focus();
+
+    const msg = $("auth-message");
+    msg.textContent = "";
+    msg.className = "text-sm min-h-[1.25rem]";
+
+    document.querySelectorAll("[data-auth-tab]").forEach((btn) => {
+        const t = btn.getAttribute("data-auth-tab");
+        if (t === mode) {
+            btn.className = "pb-2 border-b-2 border-cyan-400 text-cyan-300";
+        } else {
+            btn.className = "pb-2 border-b-2 border-transparent text-zinc-500";
+        }
+    });
+
+    const confirmWrap = $("auth-confirm-wrap");
+    const submitBtn = $("auth-submit");
+
+    if (mode === "register") {
+        confirmWrap.classList.remove("hidden");
+        submitBtn.textContent = "TẠO TÀI KHOẢN";
+    } else {
+        confirmWrap.classList.add("hidden");
+        submitBtn.textContent = "ĐĂNG NHẬP";
+    }
 }
 
 function closeAuthModal() {
@@ -840,771 +1300,119 @@ function closeAuthModal() {
     modal.classList.remove("flex");
 }
 
-function setAuthMode(mode) {
-    state.authMode = mode;
-    const isRegister = mode === "register";
-
-    document.querySelectorAll("[data-auth-tab]").forEach((btn) => {
-        const active = btn.dataset.authTab === mode;
-        btn.classList.toggle("border-cyan-400", active);
-        btn.classList.toggle("text-cyan-300", active);
-        btn.classList.toggle("border-transparent", !active);
-        btn.classList.toggle("text-zinc-500", !active);
-    });
-
-    $("auth-confirm-wrap").classList.toggle("hidden", !isRegister);
-    $("auth-submit").textContent = isRegister ? "TẠO TÀI KHOẢN" : "ĐĂNG NHẬP";
-    $("auth-password").autocomplete = isRegister ? "new-password" : "current-password";
-    setAuthMessage("");
-}
-
-function setAuthMessage(message, type = "error") {
-    const el = $("auth-message");
-    el.classList.remove("text-red-400", "text-green-400");
-    el.classList.add(type === "success" ? "text-green-400" : "text-red-400");
-    el.textContent = message;
-}
-
-/** Lưu người dùng sau khi đăng nhập thành công. */
-function applyLoggedInUser(user, token) {
-    state.user = user;
-    state.token = token || null;
-    if (Number.isFinite(user.elo)) {
-        state.playerElo = user.elo;
-    }
-    persistData();
-    renderHeader();
-    renderGameBoard();
-}
-
-async function handleAuthSubmit(event) {
-    event.preventDefault();
-
+async function handleAuthSubmit(e) {
+    e.preventDefault();
     const username = $("auth-username").value.trim();
     const password = $("auth-password").value;
-    const isRegister = state.authMode === "register";
+    const confirm = $("auth-confirm").value;
+    const msg = $("auth-message");
 
-    // Kiểm tra phía client (server vẫn kiểm tra lại)
     if (!username || !password) {
-        setAuthMessage("Vui lòng nhập tên đăng nhập và mật khẩu.");
+        msg.className = "text-sm text-red-400";
+        msg.textContent = "Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu.";
         return;
     }
-    if (isRegister) {
-        if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) {
-            setAuthMessage("Tên đăng nhập 3-20 ký tự, chỉ gồm chữ, số và dấu gạch dưới.");
-            return;
-        }
-        if (password.length < 6) {
-            setAuthMessage("Mật khẩu phải có ít nhất 6 ký tự.");
-            return;
-        }
-        if (password !== $("auth-confirm").value) {
-            setAuthMessage("Mật khẩu nhập lại không khớp.");
+
+    if (state.authMode === "register") {
+        if (password !== confirm) {
+            msg.className = "text-sm text-red-400";
+            msg.textContent = "Mật khẩu xác nhận không khớp.";
             return;
         }
     }
 
     setDisabled("auth-submit", true);
-    setAuthMessage("Đang xử lý...", "success");
+    msg.className = "text-sm text-cyan-300";
+    msg.textContent = "Đang xử lý...";
+
+    const url = state.authMode === "register" ? API.REGISTER : API.LOGIN;
 
     try {
-        if (isRegister) {
-            await apiPost(API.REGISTER, { username, password });
-        }
-        const data = await apiPost(API.LOGIN, { username, password });
-        if (!data.token) {
-            throw new Error("Máy chủ không trả về token đăng nhập.");
-        }
-        applyLoggedInUser(data.user, data.token);
+        const res = await apiPost(url, { username, password });
+        state.user = res.user;
+        state.token = res.token || state.token;
+        state.playerElo = res.user.elo;
+        persistData();
+
+        msg.className = "text-sm text-green-400";
+        msg.textContent = res.message || "Thành công!";
+
+        await sleep(500);
         closeAuthModal();
-        loadLeaderboard();
-    } catch (error) {
-        const message = error.status === 404
-            ? "API xác thực chưa được triển khai trên server (thiếu route /api/auth)."
-            : error.message;
-        setAuthMessage(message);
+        renderHeader();
+        refreshSession();
+    } catch (err) {
+        msg.className = "text-sm text-red-400";
+        msg.textContent = err.message;
     } finally {
         setDisabled("auth-submit", false);
     }
 }
 
-// ======================================================================
-// CHUYỂN TAB
-// ======================================================================
-function switchTab(tabName) {
-    document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
-        panel.classList.toggle("hidden", panel.dataset.tabPanel !== tabName);
-    });
-    document.querySelectorAll("[data-tab-btn]").forEach((btn) => {
-        const active = btn.dataset.tabBtn === tabName;
-        btn.classList.toggle("border-cyan-400", active);
-        btn.classList.toggle("text-cyan-300", active);
-        btn.classList.toggle("border-transparent", !active);
-        btn.classList.toggle("text-zinc-500", !active);
-    });
-    state.activeTab = tabName;
-}
-
-// ======================================================================
-// BẢNG XẾP HẠNG
-// ======================================================================
-function renderLeaderboard(players, isDemo) {
-    const body = $("leaderboard-body");
-    body.replaceChildren();
-
-    players.slice(0, 10).forEach((player, index) => {
-        const row = document.createElement("tr");
-        row.className = "border-t border-zinc-800 hover:bg-cyan-500/5";
-        if (state.user && state.user.username.toLowerCase() === String(player.username).toLowerCase()) {
-            row.classList.add("bg-green-500/10");
-        }
-
-        const cells = [
-            { text: String(index + 1), cls: index === 0 ? "neon-pink font-bold" : "text-zinc-500", align: "left" },
-            { text: player.username, cls: "text-cyan-200", align: "left" },
-            { text: String(player.elo), cls: "neon-cyan font-bold", align: "right" },
-            { text: String(player.pvp_wins), cls: "text-green-400", align: "right" },
-            { text: String(player.pvp_losses), cls: "text-red-400", align: "right" },
-        ];
-        cells.forEach((cell) => {
-            const td = document.createElement("td");
-            td.className = `px-5 py-2 text-${cell.align} ${cell.cls}`;
-            td.textContent = cell.text;
-            row.appendChild(td);
-        });
-        body.appendChild(row);
-    });
-
-    if (players.length === 0) {
-        body.innerHTML = '<tr><td colspan="5" class="px-5 py-6 text-center text-zinc-500">Chưa có người chơi nào.</td></tr>';
-    }
-    setText("leaderboard-note", isDemo ? "DỮ LIỆU DEMO (API chưa sẵn sàng)" : "CẬP NHẬT TRỰC TIẾP");
-}
-
-/** Tải bảng xếp hạng từ GET /api/leaderboard; lỗi thì dùng dữ liệu demo. */
-async function loadLeaderboard() {
-    try {
-        const response = await fetch(API.LEADERBOARD);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        const data = await response.json();
-        if (!data.success || !Array.isArray(data.players)) {
-            throw new Error("Dữ liệu không hợp lệ");
-        }
-        setConnection("online");
-        renderLeaderboard(data.players, false);
-    } catch (error) {
-        // 404 nghĩa là server có chạy nhưng chưa có route này
-        renderLeaderboard(DEMO_LEADERBOARD, true);
-    }
-}
-
-/** Kiểm tra server có phản hồi hay không (dùng route /api/leaderboard). */
-async function checkConnection() {
-    try {
-        const response = await fetch(API.LEADERBOARD, { method: "GET" });
-        if (response.ok) {
-            setConnection("online");
-        } else {
-            setConnection("online", "ONLINE (API THIẾU)");
-        }
-    } catch (error) {
-        setConnection("offline");
-    }
-}
-
-// ======================================================================
-// ĐẾM NGƯỢC 30 GIÂY
-// ======================================================================
-function renderTimer() {
-    const seconds = Math.max(0, state.timeLeft);
-    const warning = seconds <= TIMER_WARNING_SECONDS;
-
-    const label = $("timer-display");
-    label.textContent = `${seconds}s`;
-    label.classList.toggle("neon-red", warning);
-    label.classList.toggle("neon-cyan", !warning);
-
-    const bar = $("timer-bar");
-    bar.style.width = `${(seconds / TURN_SECONDS) * 100}%`;
-    bar.classList.toggle("bg-red-500", warning);
-    bar.classList.toggle("bg-cyan-400", !warning);
-}
-
-function stopCountdown() {
-    if (state.timerId !== null) {
-        clearInterval(state.timerId);
-        state.timerId = null;
-    }
-}
-
-function startCountdown(seconds = TURN_SECONDS) {
-    stopCountdown();
-    state.timeLeft = seconds;
-    renderTimer();
-
-    state.timerId = setInterval(() => {
-        state.timeLeft -= 1;
-        renderTimer();
-        if (state.timeLeft <= 0) {
-            stopCountdown();
-            if (state.phase === "playing" && !state.busy) {
-                setStatus("Hết giờ! Hệ thống tự động bỏ bài.", "warning");
-                playerAction("FOLD");
-            }
-        }
-    }, 1000);
-}
-
-// ======================================================================
-// GIẢI MÃ TOÁN HỌC
-// ======================================================================
-
-/** Chuỗi công thức hiển thị theo chế độ. */
-function formulaText(mode) {
-    return mode === "EXTREME"
-        ? "M = (SA × X) + (SB × Y) − Z    |    X, Y, Z = 3 lá bài bàn đầu tiên"
-        : "M = (SA + SB) × X    |    X = lá bài bàn đầu tiên";
-}
-
-/** Tính SB đúng từ M, bài bàn và SA của người chơi (người chơi cũng tự tính được). */
-function computeOpponentScore() {
-    const [x, y, z] = state.boardCards;
-    const sa = sum(state.playerHand);
-    if (state.mode === "EXTREME") {
-        return (state.mysteryValue - sa * x + z) / y;
-    }
-    return state.mysteryValue / x - sa;
-}
-
-function resetDecryptPanel() {
-    state.decryptLeft = DECRYPT_MAX_ATTEMPTS;
-    state.decrypted = false;
-    $("math-input").value = "";
-    setText("decrypt-left", String(state.decryptLeft));
-    $("decrypt-feedback").textContent = "";
-}
-
-// ----------------------------------------------------------------------
-// LẬT LÁ BÍ ẨN
-// Cả 5 lá bàn (X, Y, Z, #4, #5) bắt đầu ở trạng thái úp. Mỗi lá có một phép
-// tính gợi ý; chỉ khi người chơi nhập đúng giá trị của lá đó thì lá mới lật.
-// ----------------------------------------------------------------------
-
-/** Lá nào bắt buộc phải lật mới tính được SB (tùy công thức của chế độ). */
-function requiredCardIndexes() {
-    return state.mode === "EXTREME" ? [0, 1, 2] : [0];   // EXTREME: X, Y, Z | còn lại: X
-}
-
-/** Các lá cần cho công thức SB mà người chơi chưa lật. */
-function missingRequiredCards() {
-    return requiredCardIndexes().filter((i) => !state.revealed[i]);
-}
-
-function randomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-/** Hiển thị số âm bằng dấu trừ đúng (−) thay vì gạch nối. */
-function fmtNumber(n) {
-    return String(n).replace("-", "−");
-}
-
-/**
- * Tạo phép tính gợi ý cho một lá. Đáp án luôn là giá trị lá bài (số nguyên).
- *   - Hai lá đầu (X, Y): phép tính một bước.
- *   - Các lá sau (Z, #4, #5): phép tính hai bước.
- */
-function buildClue(value, label, index) {
-    const k = randomInt(2, 9);
-    const m = randomInt(1, 9);
-    const kind = randomInt(0, 2);
-
-    if (index < 2) {
-        if (kind === 0) return { text: `${label} + ${k} = ${fmtNumber(value + k)}`, answer: value };
-        if (kind === 1) return { text: `${label} − ${k} = ${fmtNumber(value - k)}`, answer: value };
-        return { text: `${label} × ${k} = ${fmtNumber(value * k)}`, answer: value };
-    }
-    if (kind === 0) return { text: `${label} × ${k} + ${m} = ${fmtNumber(value * k + m)}`, answer: value };
-    if (kind === 1) return { text: `${label} × ${k} − ${m} = ${fmtNumber(value * k - m)}`, answer: value };
-    return { text: `(${label} + ${m}) × ${k} = ${fmtNumber((value + m) * k)}`, answer: value };
-}
-
-/** Khởi tạo lại trạng thái các lá bí ẩn cho ván mới: tất cả úp, tạo phép tính. */
-function resetRevealPanel() {
-    state.revealed = Array(state.boardCards.length).fill(false);
-    state.clues = state.boardCards.map((value, i) => buildClue(value, BOARD_LABELS[i] || `#${i + 1}`, i));
-    state.activeCard = state.boardCards.length ? 0 : -1;
-    state.justRevealed = -1;
-    $("reveal-input").value = "";
-    $("reveal-feedback").textContent = "";
-}
-
-function setRevealFeedback(message, type) {
-    const colors = { success: "text-green-400", error: "text-red-400", warning: "text-yellow-300" };
-    const el = $("reveal-feedback");
-    el.className = `mt-2 text-sm min-h-[1.25rem] ${colors[type] || ""}`;
-    el.textContent = message;
-}
-
-/** Chọn một lá úp để giải (bấm trực tiếp vào lá bài). */
-function selectCard(index) {
-    if (state.phase !== "playing" || state.busy || state.revealed[index]) {
-        return;
-    }
-    state.activeCard = index;
-    $("reveal-input").value = "";
-    $("reveal-feedback").textContent = "";
-    renderGameBoard();
-    $("reveal-input").focus();
-}
-
-/** Kiểm tra đáp án của lá đang chọn; đúng thì lật lá đó. */
-function submitReveal() {
-    if (state.phase !== "playing" || state.busy) {
-        return;
-    }
-    const index = state.activeCard;
-    if (index < 0 || state.revealed[index]) {
-        return;
-    }
-
-    const raw = $("reveal-input").value.trim();
-    const guess = Number(raw);
-    if (raw === "" || !Number.isFinite(guess)) {
-        setRevealFeedback("Vui lòng nhập một con số hợp lệ.", "warning");
-        return;
-    }
-
-    const label = BOARD_LABELS[index] || `#${index + 1}`;
-    if (Math.abs(guess - state.clues[index].answer) < 1e-9) {
-        state.revealed[index] = true;
-        state.justRevealed = index;                          // chạy hiệu ứng lật cho lá này
-        state.activeCard = state.revealed.findIndex((opened) => !opened);  // lá úp kế tiếp, -1 nếu hết
-        $("reveal-input").value = "";
-        setRevealFeedback(`Đã lật lá ${label}: ${state.clues[index].answer}`, "success");
-        renderGameBoard();
-        if (state.activeCard !== -1) {
-            $("reveal-input").focus();
-        }
-    } else {
-        setRevealFeedback(`Chưa đúng, hãy tính lại lá ${label}.`, "error");
-        $("reveal-input").select();
-    }
-}
-
-/** Cập nhật phần Bước 1 (phép tính, tiến độ, nút) và yêu cầu của Bước 2. */
-function renderRevealPanel() {
-    const total = state.boardCards.length;
-    const opened = state.revealed.filter(Boolean).length;
-    setText("reveal-progress", `(${opened}/${total || BOARD_SIZE})`);
-
-    const index = state.activeCard;
-    const playing = state.phase === "playing";
-    let clueText = "--";
-    if (total > 0 && playing && index >= 0) {
-        clueText = `Lá ${BOARD_LABELS[index] || `#${index + 1}`}:  ${state.clues[index].text}`;
-    } else if (total > 0 && opened === total) {
-        clueText = "Đã lật toàn bộ lá bí ẩn.";
-    } else if (total > 0 && state.phase !== "idle") {
-        clueText = "Hết lượt giải mã lá bí ẩn.";
-    }
-    setText("clue-display", clueText);
-
-    const canReveal = playing && !state.busy && index >= 0;
-    setDisabled("btn-reveal", !canReveal);
-    setDisabled("reveal-input", !canReveal);
-
-    // Bước 2 chỉ mở khi đã lật đủ các lá mà công thức SB cần
-    let requirement = "";
-    if (playing && !state.decrypted) {
-        const missing = missingRequiredCards();
-        requirement = missing.length > 0
-            ? `Cần lật lá ${missing.map((i) => BOARD_LABELS[i]).join(", ")} ở Bước 1 trước khi tính SB.`
-            : "Đã đủ dữ kiện: hãy tính SB.";
-    }
-    setText("decrypt-requirement", requirement);
-}
-
-function submitDecrypt() {
-    if (state.phase !== "playing" || state.busy || state.decrypted || state.decryptLeft <= 0) {
-        return;
-    }
-
-    const feedback = $("decrypt-feedback");
-
-    // Chưa lật đủ lá cần thiết thì chưa có dữ kiện để tính SB
-    const missing = missingRequiredCards();
-    if (missing.length > 0) {
-        feedback.className = "mt-3 text-sm min-h-[1.5rem] text-yellow-300";
-        feedback.textContent = `Hãy lật lá ${missing.map((i) => BOARD_LABELS[i]).join(", ")} trước khi giải mã SB.`;
-        return;
-    }
-
-    const raw = $("math-input").value.trim();
-    const guess = Number(raw);
-
-    if (raw === "" || !Number.isFinite(guess)) {
-        feedback.className = "mt-3 text-sm min-h-[1.5rem] text-yellow-300";
-        feedback.textContent = "Vui lòng nhập một con số hợp lệ.";
-        return;
-    }
-
-    const expected = computeOpponentScore();
-    if (Math.abs(guess - expected) < 1e-9) {
-        state.decrypted = true;
-        const sa = sum(state.playerHand);
-        let verdict;
-        if (expected > sa) {
-            verdict = "Đối thủ MẠNH hơn bạn. Cân nhắc BỎ BÀI.";
-        } else if (expected < sa) {
-            verdict = "Đối thủ YẾU hơn bạn. Nên THEO.";
-        } else {
-            verdict = "Hai bên HÒA điểm.";
-        }
-        feedback.className = "mt-3 text-sm min-h-[1.5rem] text-green-400";
-        feedback.textContent = `GIẢI MÃ THÀNH CÔNG: SB = ${expected}. ${verdict}`;
-        setDisabled("btn-decrypt", true);
-        setDisabled("math-input", true);
-        return;
-    }
-
-    state.decryptLeft -= 1;
-    setText("decrypt-left", String(state.decryptLeft));
-    feedback.className = "mt-3 text-sm min-h-[1.5rem] text-red-400";
-    if (state.decryptLeft <= 0) {
-        feedback.textContent = "GIẢI MÃ THẤT BẠI. Bạn đã hết lượt thử.";
-        setDisabled("btn-decrypt", true);
-        setDisabled("math-input", true);
-    } else {
-        feedback.textContent = `Sai rồi. Còn ${state.decryptLeft} lượt thử.`;
-    }
-}
-
-// ======================================================================
-// VẼ BÀN CHƠI
-// ======================================================================
-function renderGameBoard() {
-    // Bài người chơi
-    const handEl = $("player-hand");
-    handEl.replaceChildren();
-    state.playerHand.forEach((value, i) => handEl.appendChild(createCard(value, `Lá ${i + 1}`, false, i)));
-    setText("player-score", state.playerHand.length ? String(sum(state.playerHand)) : "--");
-
-    // Bài bàn: 5 lá bí ẩn (X, Y, Z, #4, #5). Mặc định ÚP; chỉ hiện số khi người chơi
-    // đã giải đúng lá đó. Hết ván (showdown) hệ thống mở nốt các lá còn úp (làm mờ).
-    const boardEl = $("board-cards");
-    boardEl.replaceChildren();
-    const gameOver = state.phase === "finished";
-    const canPick = state.phase === "playing" && !state.busy;
-    state.boardCards.forEach((value, i) => {
-        const opened = state.revealed[i] === true;
-        const faceUp = opened || gameOver;
-        boardEl.appendChild(createCard(value, BOARD_LABELS[i] || `#${i + 1}`, !faceUp, i, {
-            animation: state.justRevealed === i ? "flip" : undefined,
-            active: !faceUp && state.phase === "playing" && i === state.activeCard,
-            dim: gameOver && !opened,
-            onClick: !faceUp && canPick ? () => selectCard(i) : null,
-        }));
-    });
-
-    // Bài Bot: úp, lộ khi showdown
-    const botEl = $("bot-hand");
-    botEl.replaceChildren();
-    if (state.phase === "finished" && state.result) {
-        state.result.bot_hand.forEach((value, i) => botEl.appendChild(createCard(value, "", false, i)));
-    } else if (state.phase !== "idle") {
-        botEl.appendChild(createCard("?", "", true));
-        botEl.appendChild(createCard("?", "", true));
-    }
-
-    // Thông số
-    setText("mystery-value", state.mysteryValue === null ? "--" : String(state.mysteryValue));
-    setText("formula-display", state.phase === "idle" ? "" : formulaText(state.mode));
-    setText("pot-value", String(state.pot));
-    setText("mode-display", state.phase === "idle" ? "--" : state.mode);
-    setText("bot-elo-display", state.phase === "idle" ? "--" : String(state.botElo));
-    setText("player-elo-display", String(state.playerElo));
-
-    let botText = "Đang chờ...";
-    if (state.botAction === "RAISE") botText = `TỐ (+${state.botRaiseAmount})`;
-    else if (state.botAction === "CALL") botText = "THEO";
-    else if (state.botAction === "FOLD") botText = "BỎ BÀI";
-    setText("bot-action-display", botText);
-
-    // Trạng thái nút
-    const canAct = state.phase === "playing" && !state.busy;
-    setDisabled("btn-call", !canAct);
-    setDisabled("btn-fold", !canAct);
-    // Giải mã SB chỉ mở khi đã lật đủ các lá bí ẩn mà công thức cần
-    const canDecrypt = canAct && !state.decrypted && state.decryptLeft > 0
-        && missingRequiredCards().length === 0;
-    setDisabled("btn-decrypt", !canDecrypt);
-    setDisabled("math-input", !canDecrypt);
-
-    renderRevealPanel();
-    renderTimer();
-
-    // Hiệu ứng (chia bài / lật bài) chỉ chạy một lần cho mỗi lần vẽ
-    state.dealAnimation = false;
-    state.justRevealed = -1;
-}
-
-function renderShowdownResult() {
-    const r = state.result;
-    if (!r) return;
-
-    const titles = { WIN: "CHIẾN THẮNG", LOSE: "THẤT BẠI", DRAW: "HÒA" };
-    const title = $("result-title");
-    title.textContent = titles[r.result] || r.result;
-    title.classList.remove("neon-green", "neon-red", "text-yellow-300");
-    title.classList.add(r.result === "WIN" ? "neon-green" : r.result === "LOSE" ? "neon-red" : "text-yellow-300");
-
-    const sign = r.elo_change > 0 ? "+" : "";
-    const bluff = r.bot_bluffed ? " (Bot đã bluff!)" : "";
-    setText(
-        "result-details",
-        `Điểm của bạn: ${r.player_score}  |  Điểm của Bot: ${r.bot_score}${bluff}\n` +
-        `Pot nhận được: ${r.pot_won} / ${r.pot}\n` +
-        `Elo: ${sign}${r.elo_change}  (mới: ${r.new_player_elo})`
-    );
-    $("result-panel").classList.remove("hidden");
-}
-
-// ======================================================================
-// LUỒNG VÁN ĐẤU
-// ======================================================================
-
-/** Bắt đầu ván mới: POST /api/game/start. */
-async function startNewMatch(mode) {
-    if (state.busy || state.phase === "playing" || state.phase === "resolving") {
-        return;
-    }
-
-    // Chế độ xếp hạng yêu cầu đăng nhập
-    if (mode === "PVP" && !state.user) {
-        openAuthModal("login");
-        setAuthMessage("Bạn cần đăng nhập để chơi Đấu Xếp Hạng.");
-        return;
-    }
-
-    // Elo của Bot: Đấu Xếp Hạng dùng Elo người chơi, các chế độ khác dùng độ khó đã chọn
-    const tierElo = parseInt($("bot-tier").value, 10) || 1500;
-    const botElo = mode === "PVP" ? state.playerElo : tierElo;
-
-    stopCountdown();
-    state.busy = true;
-    state.lastMode = mode;
-    $("result-panel").classList.add("hidden");
-    switchTab("game");
-    setStatus("Đang khởi tạo ván đấu...", "info");
-    renderGameBoard();
-
-    try {
-        const data = await apiPost(API.START, { mode, bot_elo: botElo });
-
-        state.gameId = data.game_id;
-        state.mode = data.mode;
-        state.botElo = botElo;
-        state.playerHand = data.player_hand;
-        state.boardCards = data.board_cards;
-        state.mysteryValue = data.mystery_value;
-        state.pot = data.pot;
-        state.playerAction = null;
-        state.botAction = null;
-        state.botRaiseAmount = 0;
-        state.result = null;
-        state.phase = "playing";
-        state.busy = false;
-
-        resetRevealPanel();     // 5 lá bí ẩn: tất cả úp, tạo phép tính gợi ý
-        resetDecryptPanel();
-        state.dealAnimation = true;
-        renderGameBoard();
-        setStatus("Ván đấu bắt đầu! Giải mã điểm đối thủ rồi chọn THEO hoặc BỎ BÀI.", "success");
-        startCountdown(TURN_SECONDS);
-    } catch (error) {
-        state.busy = false;
-        state.phase = "idle";
-        renderGameBoard();
-        const message = error.status === 404
-            ? "Không tìm thấy API game trên server (route /api/game/start)."
-            : error.message;
-        setStatus(message, "error");
-    }
-}
-
-/** Người chơi THEO hoặc BỎ BÀI, sau đó Bot hành động: POST /api/game/bot-turn. */
-async function playerAction(action) {
-    if (state.phase !== "playing" || state.busy) {
-        return;
-    }
-    const normalized = String(action || "").toUpperCase();
-    if (normalized !== "CALL" && normalized !== "FOLD") {
-        setStatus("Hành động không hợp lệ.", "error");
-        return;
-    }
-
-    stopCountdown();
-    state.busy = true;
-    state.playerAction = normalized;
-    renderGameBoard();
-    setStatus(normalized === "FOLD" ? "Bạn bỏ bài. Đang chờ Bot..." : "Bạn theo. Bot đang suy nghĩ...", "info");
-
-    try {
-        const data = await apiPost(API.BOT_TURN, { game_id: state.gameId });
-
-        state.botAction = data.action;
-        state.botRaiseAmount = data.raise_amount;
-        state.pot = data.pot;
-        state.phase = "resolving";
-        state.busy = false;
-        renderGameBoard();
-
-        if (data.action === "RAISE") {
-            setStatus(`Bot TỐ thêm ${data.raise_amount}! Pot hiện tại: ${data.pot}.`, "warning");
-        } else if (data.action === "CALL") {
-            setStatus("Bot THEO.", "info");
-        } else {
-            setStatus("Bot BỎ BÀI!", "success");
-        }
-
-        await sleep(SHOWDOWN_DELAY_MS);
-        await processShowdown();
-    } catch (error) {
-        state.busy = false;
-        if (error.status === 404) {
-            // Ván không còn trên server (hết hạn hoặc nằm ở instance khác)
-            state.phase = "idle";
-            renderGameBoard();
-            setStatus(`${error.message} Hãy bắt đầu ván mới.`, "error");
-            return;
-        }
-        state.phase = "playing";
-        state.playerAction = null;
-        renderGameBoard();
-        setStatus(error.message, "error");
-        startCountdown(Math.max(state.timeLeft, 5));
-    }
-}
-
-/** Mở bài: POST /api/game/showdown. */
-async function processShowdown() {
-    if (!state.gameId || state.busy || state.phase !== "resolving") {
-        return;
-    }
-
-    state.busy = true;
-    setStatus("Đang mở bài...", "info");
-    renderGameBoard();
-
-    try {
-        const data = await apiPost(API.SHOWDOWN, {
-            game_id: state.gameId,
-            player_action: state.playerAction || "CALL",
-            player_elo: state.playerElo,
-        });
-
-        state.result = data;
-        state.pot = data.pot;
-        state.playerElo = data.new_player_elo;
-        persistData();
-
-        state.phase = "finished";
-        state.busy = false;
-        renderHeader();
-        renderGameBoard();
-        renderShowdownResult();
-
-        if (data.result === "WIN") setStatus("Bạn thắng ván này!", "success");
-        else if (data.result === "LOSE") setStatus("Bạn thua ván này.", "error");
-        else setStatus("Ván đấu hòa.", "warning");
-    } catch (error) {
-        state.busy = false;
-        state.phase = error.status === 404 ? "idle" : "resolving";
-        renderGameBoard();
-        setStatus(error.message, "error");
-
-        // Lỗi tạm thời: thử lại sau 2 giây
-        if (error.status !== 404 && error.status !== 409) {
-            setTimeout(() => {
-                if (state.phase === "resolving" && !state.busy) processShowdown();
-            }, 2000);
-        }
-    }
-}
-
-// ======================================================================
-// KHỞI TẠO
-// ======================================================================
 function init() {
-    loadStoredData();
+    const savedElo = localStorage.getItem(STORAGE_ELO);
+    if (savedElo) state.playerElo = parseInt(savedElo, 10) || DEFAULT_ELO;
+
+    const savedUser = localStorage.getItem(STORAGE_USER);
+    if (savedUser) {
+        try { state.user = JSON.parse(savedUser); } catch (e) {}
+    }
+
+    const savedToken = localStorage.getItem(STORAGE_TOKEN);
+    if (savedToken) {
+        state.token = savedToken;
+    }
+
     renderHeader();
-    renderGameBoard();
 
-    // Tab
     document.querySelectorAll("[data-tab-btn]").forEach((btn) => {
-        btn.addEventListener("click", () => switchTab(btn.dataset.tabBtn));
+        btn.addEventListener("click", () => switchTab(btn.getAttribute("data-tab-btn")));
     });
-    switchTab("lobby");
 
-    // Chọn chế độ ở sảnh
     document.querySelectorAll("[data-start-mode]").forEach((btn) => {
-        btn.addEventListener("click", () => startNewMatch(btn.dataset.startMode));
+        btn.addEventListener("click", () => startMatch(btn.getAttribute("data-start-mode")));
     });
 
-    // Điều khiển ván đấu
-    $("btn-call").addEventListener("click", () => playerAction("CALL"));
-    $("btn-fold").addEventListener("click", () => playerAction("FOLD"));
-    $("btn-decrypt").addEventListener("click", submitDecrypt);
-    $("btn-reveal").addEventListener("click", submitReveal);
-    $("reveal-input").addEventListener("keydown", (e) => {
-        if (e.key === "Enter") submitReveal();
-    });
-    $("math-input").addEventListener("keydown", (e) => {
-        if (e.key === "Enter") submitDecrypt();
-    });
-    $("btn-rematch").addEventListener("click", () => {
-        state.phase = "finished";
-        startNewMatch(state.lastMode);
-    });
-    $("btn-back-lobby").addEventListener("click", () => {
-        state.phase = "idle";
-        state.result = null;
-        $("result-panel").classList.add("hidden");
-        renderGameBoard();
-        switchTab("lobby");
-        loadLeaderboard();
-    });
+    $("btn-open-login")?.addEventListener("click", () => openAuthModal("login"));
+    $("btn-open-register")?.addEventListener("click", () => openAuthModal("register"));
+    $("btn-close-modal")?.addEventListener("click", closeAuthModal);
 
-    // Auth
-    $("btn-open-login").addEventListener("click", () => openAuthModal("login"));
-    $("btn-open-register").addEventListener("click", () => openAuthModal("register"));
-    $("btn-logout").addEventListener("click", logout);
-    $("btn-close-modal").addEventListener("click", closeAuthModal);
-    $("auth-modal").addEventListener("click", (e) => {
-        if (e.target.id === "auth-modal") closeAuthModal();
-    });
     document.querySelectorAll("[data-auth-tab]").forEach((btn) => {
-        btn.addEventListener("click", () => setAuthMode(btn.dataset.authTab));
-    });
-    $("auth-form").addEventListener("submit", handleAuthSubmit);
-    document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") closeAuthModal();
+        btn.addEventListener("click", () => openAuthModal(btn.getAttribute("data-auth-tab")));
     });
 
-    // Dữ liệu từ server
-    checkConnection();
+    $("auth-form")?.addEventListener("submit", handleAuthSubmit);
+
+    $("btn-logout")?.addEventListener("click", () => {
+        state.user = null;
+        state.token = null;
+        state.playerElo = DEFAULT_ELO;
+        persistData();
+        renderHeader();
+        setStatus("Đã đăng xuất tài khoản.", "info");
+    });
+
+    $("btn-reveal")?.addEventListener("click", handleReveal);
+    $("reveal-input")?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleReveal();
+    });
+
+    $("btn-decrypt")?.addEventListener("click", handleDecrypt);
+    $("math-input")?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleDecrypt();
+    });
+
+    $("btn-call")?.addEventListener("click", handleCall);
+    $("btn-fold")?.addEventListener("click", handleFold);
+
+    $("btn-rematch")?.addEventListener("click", () => startMatch(state.lastMode));
+    $("btn-back-lobby")?.addEventListener("click", () => switchTab("lobby"));
+
     loadLeaderboard();
-    refreshSession();  // đồng bộ Elo thật của tài khoản (nếu đang đăng nhập)
+    refreshSession();
 }
 
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-} else {
-    init();
-}
+document.addEventListener("DOMContentLoaded", init);
 </script>
 </body>
 </html>
